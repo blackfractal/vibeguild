@@ -4,8 +4,14 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const nodes=new Map();
-function node(selector){if(!nodes.has(selector))nodes.set(selector,{innerHTML:'',value:'',scrollTop:0,scrollHeight:1000,clientHeight:400,removed:false,insertAdjacentHTML(_,html){this.innerHTML+=html;},remove(){this.removed=true;}});return nodes.get(selector);}
-const context=vm.createContext({console,Date,JSON,Number,String,Map,FormData:class{},document:{querySelector:node,addEventListener(){},activeElement:null},window:{},localStorage:{setItem(){},getItem(){return null;}},setTimeout,clearTimeout,fetch(){throw Error('Unexpected network in pure rendering tests');}});
+// Stubs only what app.js actually touches; a real browser layout is still not covered here.
+function node(selector){if(!nodes.has(selector))nodes.set(selector,{innerHTML:'',value:'',scrollTop:0,scrollHeight:1000,clientHeight:400,removed:false,dataset:{},attributes:{},style:{values:{},setProperty(name,value){this.values[name]=value;},getPropertyValue(name){return this.values[name];}},setAttribute(name,value){this.attributes[name]=value;},getAttribute(name){return this.attributes[name];},getBoundingClientRect(){return {left:0,right:1400,top:0,bottom:900,width:1400,height:900};},insertAdjacentHTML(_,html){this.innerHTML+=html;},remove(){this.removed=true;}});return nodes.get(selector);}
+const listeners={},stored={};
+const fire=(type,event)=>(listeners[type]||[]).forEach(fn=>fn(event));
+const gutterEvent=(side,extra={})=>{const handle={dataset:{side},closest:s=>s==='.gutter'?handle:null};return {target:handle,preventDefault(){},...extra};};
+// A press on the collapse button reports both the button and the handle it sits inside.
+const buttonEvent=(side,extra={})=>{const handle={dataset:{side}},toggle={dataset:{side,act:'panel'},closest:s=>s==='.gutter'?handle:s==='[data-act]'?toggle:null};return {target:toggle,preventDefault(){},...extra};};
+const context=vm.createContext({console,Date,JSON,Number,String,Map,FormData:class{},document:{querySelector:node,addEventListener(type,fn){(listeners[type]=listeners[type]||[]).push(fn);},removeEventListener(type,fn){listeners[type]=(listeners[type]||[]).filter(f=>f!==fn);},activeElement:null},window:{},localStorage:{setItem(key,value){stored[key]=String(value);},getItem(key){return key in stored?stored[key]:null;}},setTimeout,clearTimeout,fetch(){throw Error('Unexpected network in pure rendering tests');}});
 let source=fs.readFileSync(require('node:path').join(__dirname,'../vibeguild/web/app.js'),'utf8').replace(/welcome\(\);\s*$/,'');
 vm.runInContext(source,context);
 const run=code=>vm.runInContext(code,context);
@@ -181,4 +187,113 @@ test('stale working agents are warned while explicit disconnect is a clean signo
   assert.equal(run(`presence(state.agents.a)`).startsWith('Lost contact'),true);
   run(`state.agents.a.status='disconnected';state.agents.a.signed_off_at=Date.now()/1000`);
   assert.equal(run(`presence(state.agents.a)`).startsWith('Signed off'),true);
+});
+const css=fs.readFileSync(require('node:path').join(__dirname,'../vibeguild/web/style.css'),'utf8');
+test('every workspace shell child holds an explicit grid column',()=>{
+  // A collapsed panel is display:none, which leaves the grid entirely. Without explicit
+  // placement the remaining children shift one column left and the conversation lands in
+  // a 5px resize track -- the regression that hid the centre chat window.
+  for(const [selector,column] of [['.sidebar','1'],['.gutter[data-side="left"]','2'],['.main','3'],['.gutter[data-side="right"]','4'],['.details','5']])
+    assert(css.includes(selector+'{grid-column:'+column+'}'),selector+' must be placed in column '+column);
+  for(const rule of css.match(/grid-template-columns:[^;}]*/g).filter(r=>r.includes('--sidebar-w')||r.includes('64px')))
+    assert.equal(rule.split(/\s+/).length,5,'the shell grid always has five columns: '+rule);
+});
+test('the side panels and the conversation share one scrollbar treatment',()=>{
+  assert(css.includes('--scroll-thumb:'),'the thumb colour is declared once as a token');
+  for(const selector of ['.stream','.sidebar','.details']){
+    // A selector carries several rules (placement, responsive); the scrolling one must use the token.
+    const rules=[...css.matchAll(new RegExp('\\'+selector+'\\{[^}]*\\}','g'))].map(m=>m[0]);
+    assert(rules.some(rule=>rule.includes('scrollbar-color:var(--scroll-thumb) transparent')),selector+' must use the shared scrollbar token');
+  }
+  assert(!/scrollbar-color:#/.test(css),'no scrollbar colour is hardcoded past the token');
+});
+test('both side panels offer a collapse button and a resize handle',()=>{
+  run(`render()`);
+  const html=node('#app').innerHTML;
+  for(const side of ['left','right']){
+    assert(html.includes(`<div class="gutter" data-side="${side}" role="separator" aria-orientation="vertical" tabindex="0"`),side+' handle');
+    assert(html.includes(`class="panel-collapse" data-act="panel" data-side="${side}"`),side+' collapse button');
+  }
+  assert(html.includes('<div class="gutter" data-side="left"')&&html.indexOf('<main class="main">')>html.indexOf('data-side="left"'));
+  assert.equal(node('.workspace').style.getPropertyValue('--sidebar-w'),'238px');
+  assert.equal(node('.workspace').style.getPropertyValue('--details-w'),'260px');
+});
+test('the collapse button lives inside its handle and never starts a drag',()=>{
+  const html=node('#app').innerHTML;
+  const handle=html.slice(html.indexOf('<div class="gutter" data-side="left"'));
+  assert(handle.indexOf('panel-collapse')<handle.indexOf('</div>'),'button is nested in the handle');
+  run(`resetPanel('left')`);
+  fire('pointerdown',buttonEvent('left'));
+  assert.equal(run(`dragSide`),null,'pressing the button must not begin a resize');
+  assert.equal(node('.workspace').dataset.resizing,undefined);
+});
+test('clicking a collapse button collapses and reopens at the same width',()=>{
+  run(`resizePanel('right',300);togglePanel('right')`);
+  assert.equal(node('.workspace').style.getPropertyValue('--details-w'),'0px');
+  assert.equal(node('.workspace').dataset.right,'closed');
+  assert.equal(node('.panel-collapse[data-side="right"]').getAttribute('aria-expanded'),'false');
+  assert.equal(JSON.parse(stored.panels).right.open,false);
+  run(`togglePanel('right')`);
+  assert.equal(node('.workspace').style.getPropertyValue('--details-w'),'300px');
+  assert.equal(node('.workspace').dataset.right,'open');
+  run(`resetPanel('right')`);
+});
+test('the arrow points the way the panel will move so a collapsed panel offers a way back',()=>{
+  run(`resetPanel('left');resetPanel('right')`);
+  assert.equal(run(`collapseArrow('left')`),'chevronLeft');
+  assert.equal(run(`collapseArrow('right')`),'chevronRight');
+  run(`togglePanel('left');togglePanel('right')`);
+  assert.equal(run(`collapseArrow('left')`),'chevronRight');
+  assert.equal(run(`collapseArrow('right')`),'chevronLeft');
+  assert(node('.panel-collapse[data-side="left"]').innerHTML.includes(run(`paths.chevronRight`)));
+  run(`resetPanel('left');resetPanel('right')`);
+});
+test('dragging a handle only ever resizes, never collapses',()=>{
+  fire('pointerdown',gutterEvent('left'));
+  assert.equal(node('.workspace').dataset.resizing,'left');
+  fire('pointermove',gutterEvent('left',{clientX:300}));
+  assert.equal(node('.workspace').style.getPropertyValue('--sidebar-w'),'300px');
+  fire('pointermove',gutterEvent('left',{clientX:1100}));
+  assert.equal(node('.workspace').style.getPropertyValue('--sidebar-w'),'430px');
+  fire('pointermove',gutterEvent('left',{clientX:-200}));
+  assert.equal(node('.workspace').style.getPropertyValue('--sidebar-w'),'170px','a drag past the minimum clamps, it does not hide the panel');
+  assert.equal(node('.workspace').dataset.left,'open');
+  fire('pointerup',gutterEvent('left'));
+  assert.equal(node('.workspace').dataset.resizing,undefined);
+  fire('pointermove',gutterEvent('left',{clientX:900}));
+  assert.equal(node('.workspace').style.getPropertyValue('--sidebar-w'),'170px','a released handle stops tracking the pointer');
+  run(`resetPanel('left')`);
+});
+test('a panel can never squeeze the conversation column below its minimum',()=>{
+  run(`resetPanel('left');resetPanel('right')`);
+  // 1400px viewport - 260px right panel - 10px handles - 400px conversation minimum.
+  assert.equal(run(`fitPanel('left',430,1400)`),430);
+  assert.equal(run(`fitPanel('left',430,1000)`),330);
+  assert.equal(run(`fitPanel('left',430,600)`),170);
+});
+test('a focused handle resizes with the arrow keys',()=>{
+  run(`resetPanel('left')`);
+  fire('keydown',gutterEvent('left',{key:'ArrowRight'}));
+  assert.equal(node('.workspace').style.getPropertyValue('--sidebar-w'),'254px');
+  fire('keydown',gutterEvent('left',{key:'ArrowLeft'}));
+  assert.equal(node('.workspace').style.getPropertyValue('--sidebar-w'),'238px');
+  fire('keydown',gutterEvent('right',{key:'ArrowLeft'}));
+  assert.equal(node('.workspace').style.getPropertyValue('--details-w'),'276px');
+  run(`resetPanel('left');resetPanel('right')`);
+});
+test('double-clicking a handle restores the preset width, but the button only toggles',()=>{
+  run(`view='activity';resizePanel('left',400)`);
+  fire('dblclick',gutterEvent('left'));
+  assert.equal(node('.workspace').style.getPropertyValue('--sidebar-w'),'238px');
+  assert.equal(run(`view`),'activity');
+  run(`resizePanel('left',400)`);
+  fire('dblclick',buttonEvent('left'));
+  assert.equal(node('.workspace').style.getPropertyValue('--sidebar-w'),'400px','the button must not reset the width');
+  run(`resetPanel('left')`);
+});
+test('saved panel geometry is restored and clamped on load',()=>{
+  stored.panels=JSON.stringify({left:{open:false,width:9999},right:{open:true,width:12}});
+  assert.equal(run(`JSON.stringify(readPanels())`),'{"left":{"open":false,"width":430},"right":{"open":true,"width":210}}');
+  delete stored.panels;
+  assert.equal(run(`JSON.stringify(readPanels())`),'{"left":{"open":true,"width":238},"right":{"open":true,"width":260}}');
 });

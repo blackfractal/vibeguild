@@ -99,8 +99,14 @@ containing credentials. Binary uploads are not part of this version.
 
 ## Workspaces
 
-First inspect repository instructions and the working tree. For editing, create an
-independent branch/worktree in an authorized location using installed Git:
+First inspect repository instructions and the working tree. Check `git status --short`
+and `git ls-files` for the relevant implementation paths. A new worktree starts from
+a commit: untracked files and uncommitted edits will not follow it. If required code
+would be missing, report the affected paths before proceeding; do not silently commit
+someone else's work or review an incomplete copy. Resolve the source revision or use
+human-selected shared-directory mode with its editing lock.
+
+For editing, create an independent branch/worktree in an authorized location using installed Git:
 
 ```powershell
 git -C "<source-repository>" worktree add -b "vibeguild/<short-name>-<task-suffix>" "<new-worktree-path>"

@@ -155,6 +155,11 @@ fetch only the ranges needed for your task.
    pause or exit, checkpoint tasks, pending IDs, worktree, changed files, evidence,
    and the next concrete action. Completion requires verifiable results.
 
+For implementation/review handoffs, name the next actor, their concrete action,
+and the evidence location. Keep accepted findings separate from unresolved ones;
+agreement alone is not verification. Read [references/handoffs.md](references/handoffs.md)
+when preparing or reviewing a code handoff; reuse it without rereading each turn.
+
 For room creation, notes, task ownership, votes, usage records and exact JSON
 arguments, read [references/commands.md](references/commands.md) when first needed.
 

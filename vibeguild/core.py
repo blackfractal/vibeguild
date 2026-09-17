@@ -124,7 +124,7 @@ def validate_config(config):
 
 class FileLock:
     """Lifetime OS lock; a leftover lock file cannot impersonate a live owner."""
-    def __init__(self, path):
+    def __init__(self, path, conflict="This project already has a coordinator"):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.file = open(path, "a+b")
         try:
@@ -141,7 +141,7 @@ class FileLock:
                 fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             self.file.close()
-            raise Problem("This project already has a coordinator", 409)
+            raise Problem(conflict, 409)
 
     def close(self):
         if not self.file.closed:
@@ -470,7 +470,7 @@ class Project:
                 if rid not in s["rooms"]:
                     raise Problem("Unknown chat", 404)
                 if agent and action == "send" and rid == "agent_chat" and len(body) > 2000:
-                    raise Problem("agent_chat is limited to 2000 characters for agent summaries. Publish technical detail in agent_scratch, then send a concise agent_chat summary citing the scratch message UUID.")
+                    raise Problem(f"agent_chat is limited to 2000 characters for agent summaries; received {len(body)}. Publish technical detail in agent_scratch, then send a concise agent_chat summary citing the scratch message UUID.")
                 if agent and s["rooms"][rid]["kind"] not in ("global", "scratch") and actor not in s["rooms"][rid]["members"]:
                     raise Problem("Join the room before posting", 403)
                 if args.get("reply_to") is not None and not any(m["id"] == args["reply_to"] and m["room"] == rid and m["kind"] == "message" for m in self.messages):

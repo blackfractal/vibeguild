@@ -222,13 +222,17 @@ class Handler(BaseHTTPRequestHandler):
                 timeout = min(45, max(0, float(args.get("timeout", 30))))
                 deadline = time.monotonic() + timeout
                 with p.changed:
-                    while not p.has_updates(after, actor) and time.monotonic() < deadline:
+                    def pending_batch():
+                        batch = p.state["sessions"][p.state["agents"][actor]["session_id"]].get("batch")
+                        return batch["id"] if batch and not batch.get("acknowledged") else None
+                    while not p.has_updates(after, actor) and not pending_batch() and time.monotonic() < deadline:
                         p.changed.wait(min(1, max(.01, deadline-time.monotonic())))
                         p.tick()
                     a = p.state["agents"][actor]
                     p.resolve_actor(credential)
                     control = {**p.state["control"], "agent_paused": a["paused"], "budget_paused": a.get("budget_paused", False)}
-                return self.respond(200, {"changed": p.has_updates(after, actor), "seq": len(p.events), "control": control})
+                    result = {"changed": p.has_updates(after, actor), "seq": len(p.events), "control": control, "pending_batch": pending_batch()}
+                return self.respond(200, result)
             raise Problem("Not found", 404)
         except Problem as exc:
             self.respond(exc.status, {"error": str(exc), "code": getattr(exc, "code", None)})

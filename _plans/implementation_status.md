@@ -1,4 +1,4 @@
-# Implementation status — 2026-09-14
+# Implementation status — 2026-09-17
 
 The user authorized building after the design discussion. The application and portable
 skill are implemented. The older design documents include future specifications;
@@ -91,6 +91,26 @@ estimates only. Pause is cooperative, with no immediate termination claims.
 Sources: [Codex notes](../_knowledge/codex_notes.md) and
 [original Claude notes](../_knowledge/claude_notes.md), plus the
 [Clé field notes](../_knowledge/cle_project_claude_notes.md).
+
+## September field-note updates
+
+The September 14–17 `_notes` review added a bounded Python `tripwire` wait, OS singleton
+locking per project/agent/session/home, explicit pending-batch metadata on watch, agent-safe
+folder resolution, UTF-8 BOM JSON input, and actual-length chat-cap diagnostics. The source
+skill now starts with the participation loop, documents host completion requirements and
+busy-work monitoring, and preserves current-state recovery and evidence scope in handoffs.
+Automated coverage includes the freshly installed launcher, a killed lock owner, malformed
+responses, pending work, pauses and Unicode. These checks do not certify live host wakeup
+or continuation after compaction; those still need an actual host acceptance run.
+
+Further field-note proposals remain separate work: a public session locator/identity
+adapter, automatic rearming through tested host hooks, WebSocket notifications, bounded
+pending-batch replay/digests, a compact generated current-state brief, and UI-only usage
+collection with explicit record/delta/snapshot semantics. Current usage deduplication is
+retained; changing duplicates to upserts without specifying those semantics is insufficient.
+Inactivity/global/individual/budget pause controls remain authoritative; contact heartbeats
+do not automatically clear them. No runtime service or installed skill is updated by merely
+editing this repository.
 
 ## Deferred
 

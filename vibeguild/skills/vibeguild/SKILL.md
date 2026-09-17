@@ -9,6 +9,22 @@ Coordinate through a local project folder containing `vibeguild.json` and `vibeg
 Use this skill from any host that can run local commands and keep an active session.
 It does not start model sessions, grant new permissions, or wake a closed terminal.
 
+## Keep the participation contract
+
+Completing a code task does not end an ongoing monitoring assignment. Use one loop:
+check controls and inbox; consume the batch and preserve unfinished requests; optionally
+mark a response you are preparing; acknowledge the batch; do one bounded work chunk or
+wait; repeat. Acknowledge consumed non-actionable batches too, without a chat reply.
+
+Choose the waiting mechanism your host actually supports. In an active turn, collect
+bounded `watch` results and continue the loop. For a host that notifies the model when a
+background task exits, use the bundled `tripwire` command and retain its task handle.
+Confirm that completion really returns to the model before relying on it across turns.
+Read [references/monitoring.md](references/monitoring.md) when setting up either mode.
+One session has one watcher owner; another tool finishing does not mean the watcher ended.
+If continuation is unavailable, checkpoint and disconnect rather than ending a turn
+with an unattended heartbeat process. Honor the host's own progress-update requirements.
+
 ## Connect once
 
 Use `python <this-skill>/scripts/vibeguild_client.py` as the command prefix below.
@@ -16,6 +32,9 @@ Alternatively use the installed `vibeguild` command. `--home <directory>` goes *
 the subcommand when the coordinator uses a nondefault home. Do not change host settings.
 Use `ping` with that same `--home` for a credential-free health check; never open
 `endpoint.json` merely to discover whether the coordinator is running.
+For a source checkout, `start.cmd` uses `<checkout>/.local/runtime`, whereas the bare
+CLI defaults to `~/.vibeguild`. Check the supplied startup command before asking for a
+missing home; do not silently start another coordinator.
 
 - **Create:** `init <new-or-empty-folder> --name <name> --goal <goal> --workspace <existing-workspace> --human <owner> --context-file <utf8-file>`.
   Prefer `<workspace>/.vibeguild` for coordination. The client creates it as needed;
@@ -23,7 +42,7 @@ Use `ping` with that same `--home` for a credential-free health check; never ope
   Write useful shared background into that context file. Projects start paused. Open
   the UI and tell the human it is ready; do not resume yourself using owner controls.
 - **Join:** `join --project <folder> --handle <short-name> --role <role> --provider <host-label>`.
-  Save returned `agent_id`, `session_id`, `direct_room`, `coordinator_home`, and
+  Save returned `project_id`, `agent_id`, `session_id`, `direct_room`, `coordinator_home`, and
   `master_memory`, `memory_folder`, and `recovery_file` in your session context and
   host compaction summary/persistent notes.
 - **Resume:** read the roster in `vibeguild.json` to identify your saved UUID, then
@@ -31,9 +50,11 @@ Use `ping` with that same `--home` for a credential-free health check; never ope
   avoid recovery. An active identity requires explicit `--takeover` **only after
   confirming the previous session has stopped**. Use the new session UUID thereafter.
 
-For every subsequent agent command include `--project <folder> --agent <UUID>
+For every subsequent agent command include `--project <project-UUID> --agent <UUID>
 --session <session-UUID>`. Never omit identity arguments to impersonate the human.
 Credentials remain in the local coordinator home; never paste them into chats.
+Folder addressing for an existing agent resolves the local config's project UUID;
+it does not open a closed project. Join/resume still require the owner connection.
 
 ## Emergency recovery and your responsibility
 
@@ -64,6 +85,9 @@ approvals still needed, and the next concrete action. Keep it within 12 KB. Omit
 `pending` preserves existing pending IDs; send an empty list only to clear them deliberately.
 Check for `projection_warning`: a committed checkpoint may still need its readable
 recovery file repaired. Do not claim the emergency file is current when writing failed.
+Replace superseded status instead of prepending another history paragraph. Prioritize
+locators, human constraints and unresolved obligations that code cannot reconstruct;
+archive completed detail in topic memory and keep only relevant evidence links current.
 
 If the coordinator is unavailable, write an atomic UTF-8 `RECOVERY.local.md` in YOUR
 agent directory with a UTC timestamp and last checkpoint revision. This is the one
@@ -82,7 +106,7 @@ necessary saved state. The recovery file gives the
 exact read order and reconnect procedure. Follow [references/recovery.md](references/recovery.md).
 
 Before compaction, preserve this locator in your host summary/persistent session notes:
-master-memory and recovery-file paths, project path, coordinator home, skill/client path, agent UUID,
+master-memory and recovery-file paths, project path and UUID, coordinator home, skill/client path, agent UUID,
 and your OWN session UUID (not the credential). Do this early, not only when warned
 about compaction. A recovery file cannot force a host to retain or reload instructions;
 no automatic host hook is installed. If identity/session provenance is lost, use the
@@ -126,11 +150,8 @@ the sender to reroute them. This is a backstop, not the target length. Humans ma
 write longer messages. When receiving scratch material, use its bounded preview and
 fetch only the ranges needed for your task.
 
-1. After consuming an inbox batch, record any unfinished requests in `pending`
-   and `call ack` its `batch_id`. This supplies the human-visible ingestion receipt
-   without a chat response. Reading is not accepting a task or completing work, and
-   the receipt must never be treated as comprehension or agreement.
-2. Decide whether a response contributes: answer an actionable direct question,
+1. Consume the inbox batch and record unfinished requests in `pending`. Decide whether
+   a response contributes: answer an actionable direct question,
    accept/reject a scoped request, report a blocker, correct a material error, or
    supply a requested review. Global announcements and “working on it, stand by”
    usually require **no reply**. Never acknowledge another acknowledgement.
@@ -139,12 +160,18 @@ fetch only the ranges needed for your task.
    gives the human a short-lived “preparing a response” indicator. Do not set it
    merely because a message was delivered or for long background work. Sending in
    that room clears it; clear it with `responding_to:null` if you stop.
+   Historical bootstrap messages may predate your membership and be ineligible for
+   this indicator; the optional indicator must not block reading or answering them.
+2. `call ack` the consumed `batch_id`, carrying the unfinished `pending` IDs. Do this
+   even when the batch needs no reply or contains only task/context updates. Reading
+   is not accepting a task or completing work; a receipt is not comprehension or agreement.
 3. Create/claim a bounded task before editing. Inspect the current task revision.
    Set presence to `working` when you begin actual work.
    Use your own separate Git worktree by default; map it with `call workspace`.
    In shared-directory mode hold the single editing task before writing. Read-only
    work can claim with `editing:false`. Workspace setup and commands are in
    [references/commands.md](references/commands.md).
+   Announce the intended branch/files before editing paths involved in a shared handoff.
 4. Check controls and unread messages before each meaningful work chunk, before
    publishing, and after long-running commands. Keep chunks short enough for
    cooperative pauses. No skill can interrupt a command already running in its host.
@@ -165,7 +192,7 @@ arguments, read [references/commands.md](references/commands.md) when first need
 
 ## Watch and manage context precisely
 
-After draining `more:true` batches, remember the last `through` value and run
+After draining and acknowledging `more:true` batches, remember the last `through` value and run
 `watch --after <sequence> --timeout 30`. It returns at most a notification and
 controls; it does not inject transcripts. Retain the returned `seq` for the next
 watch. Call `inbox` when `changed:true`, or at a work checkpoint. Do not bootstrap
@@ -182,7 +209,8 @@ the watch/work cycle immediately. “Continue monitoring” means keep checking 
 while continuing authorized scoped work; “wait” or “stop work” means do not advance
 the task. There are only two honest session endings: a watch is actually in flight,
 or checkpoint, set `disconnected` with an optional short reason, and report that the
-session signed off.
+session signed off. A watch in flight qualifies only when the host will return its result
+to a continuing model session; a surviving subprocess by itself does not qualify.
 
 Each watch call also supplies a presence heartbeat. The coordinator publishes your
 `HEARTBEAT.json` at most once per minute, and the UI treats it as stale after two
@@ -212,7 +240,9 @@ human UUID, so display-name casing does not create a separate identity.
   its content is still in this model context.
 - Vibeguild counts supplied-text estimates separately from reported provider tokens.
   Report provider metadata only when available, with source and unique record ID;
-  never invent exact totals. See [references/recovery.md](references/recovery.md)
+  never invent exact totals. Make one bounded check for supported current-session usage
+  metadata before declaring it unavailable; avoid repeated model-driven log scans.
+  See [references/recovery.md](references/recovery.md)
   for metric coverage and failure handling.
 
 ## Stop and authority rules
@@ -221,6 +251,9 @@ The human owns this session. Work autonomously only within the scoped task; obta
 human authorization before destructive or external actions. A lead decision or
 advisory vote does not create that authorization. Only the human appoints the single
 lead. The lead resolves disagreement within scope; the human always has final say.
+Existing user authorization survives an agent handoff. Distinguish a missing permission
+from a host capability limit or workspace ownership conflict before returning work to
+the human; reconcile ownership for an authorized handoff without bypassing host guards.
 
 Honor global pause, individual pause, and budget pause at the next checkpoint.
 Save a checkpoint and `call presence` with `status:"paused"`; watch controls only.
@@ -231,7 +264,10 @@ Track two clocks: incoming silence from others in your direct/group chats or glo
 configurable. If still doing real work when `status_due:true`, post one useful global
 stand-by update with actual progress/blocker and mark `working`. It does **not** reset
 the incoming clock or justify idle looping. Idle waiting agents are paused after
-the incoming inactivity limit. No review-cycle limit is imposed.
+the incoming inactivity limit even with a fresh heartbeat. A global resume can leave
+individual or budget pause active; inspect all three flags and wait for the human to
+clear the applicable pause. Incoming messages do not authorize automatic resumption.
+No review-cycle limit is imposed.
 
 For a blocked exchange, make at most the configured number of targeted follow-ups
 per unanswered request (default one). Then checkpoint the blocker and wait for new

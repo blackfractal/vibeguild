@@ -14,12 +14,16 @@ Include in the evidence message:
 
 - **Target:** task ID, repository/worktree, revision and relevant files. If changes
   are uncommitted or untracked, say so; a commit ID alone does not identify them.
+  Record the branch/base and tree or file hashes when later commits must be matched
+  to this review; a matching tree can preserve source review across changed ancestry.
 - **Claim and check:** the behavior being claimed, exact command and working
   directory, relevant runtime/dependencies, observed result, and evidence location.
 - **Limits:** what remains untested, failed, or conditional on the environment.
 
 Avoid repeating full logs or earlier evidence. Cite the earlier message and describe
 only what changed. If files changed after testing, identify what needs rechecking.
+Publish the handoff in the shared room even if you already reported it in your terminal.
+Close it with a result/evidence link; keep owner and next action visible until then.
 
 ## Verify the claimed boundary
 
@@ -34,6 +38,15 @@ relevant stderr as well as the exit code: `OK` alongside `ResourceWarning` or
 `Exception ignored in` is evidence to investigate, not an unqualified clean result.
 Use judgment about which checks the change needs; mutation testing is not mandatory
 for every edit.
+
+For a release-readiness recommendation, reproduce the declared CI in a clean declared
+environment when feasible. If only focused checks ran, qualify the recommendation.
+Keep source review, compiled code, browser interaction, local CI reproduction, hosted
+CI, merge, deployment and live service checks separate. Preserve the observer and method:
+a human visual check or a peer's report is useful evidence with that specific scope.
+When testing a monitor or adapter, exercise its own observation path with known data;
+another process noticing the same event does not validate the adapter. Distinguish a valid
+empty result from a missing source or an unexpected schema.
 
 ## Return actionable findings
 

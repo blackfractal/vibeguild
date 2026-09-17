@@ -205,6 +205,74 @@ class HTTPTests(unittest.TestCase):
         self.assertNotEqual(0, missing.returncode)
         self.assertIn("--session", missing.stderr)
 
+    def test_installed_tripwire_and_folder_identity_without_owner_auth(self):
+        installed = subprocess.run([sys.executable, "-m", "vibeguild", "install-skill", "--dest", str(self.root / "skills")],
+                                   cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(0, installed.returncode, installed.stderr)
+        client = self.root / "skills" / "vibeguild" / "scripts" / "vibeguild_client.py"
+        def cli(*args):
+            return subprocess.run([sys.executable, str(client), "--home", str(self.root / "runtime"), *args],
+                                  cwd=self.root, capture_output=True, text=True, encoding="utf-8", timeout=10)
+        joined = cli("join", "--project", str(self.p.path), "--handle", "monitor")
+        self.assertEqual(0, joined.returncode, joined.stderr)
+        identity = json.loads(joined.stdout)
+        self.assertEqual(self.p.id, identity["project_id"])
+        args = ["--project", str(self.p.path), "--agent", identity["agent_id"], "--session", identity["session_id"]]
+        self.cmd("control", {"paused": False})
+        # Invalidate only the client's owner token; the agent credential remains valid.
+        endpoint_path = self.root / "runtime" / "endpoint.json"
+        endpoint = json.loads(endpoint_path.read_text("utf-8"))
+        endpoint["credential"] = "expired-owner"
+        endpoint_path.write_text(json.dumps(endpoint), encoding="utf-8")
+        boot = cli("inbox", *args, "--bootstrap")
+        self.assertEqual(0, boot.returncode, boot.stderr)
+        batch = json.loads(boot.stdout)
+        wait = cli("tripwire", *args, "--after", str(batch["through"]), "--max-seconds", ".05")
+        self.assertNotEqual(0, wait.returncode)
+        self.assertIn(batch["batch_id"], wait.stderr)
+        ack_file = self.root / "ack.json"
+        ack_file.write_text(json.dumps({"batch_id": batch["batch_id"], "pending": ["unfinished-request"]}), encoding="utf-8-sig")
+        ack = cli("call", "ack", *args, "--data-file", str(ack_file))
+        self.assertEqual(0, ack.returncode, ack.stderr)
+        seq = len(self.p.events)
+        waiting = cli("tripwire", *args, "--after", str(seq), "--max-seconds", ".05")
+        self.assertEqual(0, waiting.returncode, waiting.stderr)
+        self.assertEqual("timeout", json.loads(waiting.stdout)["reason"])
+        wait_started = threading.Event()
+        original_wait = self.p.changed.wait
+        def signal_wait(timeout):
+            wait_started.set()
+            return original_wait(timeout)
+        with patch.object(self.p.changed, "wait", side_effect=signal_wait):
+            command = [sys.executable, str(client), "--home", str(self.root / "runtime"), "tripwire", *args,
+                       "--after", str(seq), "--max-seconds", "5"]
+            with subprocess.Popen(command, cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True, encoding="utf-8") as watcher:
+                try:
+                    self.assertTrue(wait_started.wait(5), "tripwire never entered the coordinator wait")
+                    sent = self.cmd("send", {"room": "agent_chat", "body": "Human steering → café 日本語"})
+                    stdout, stderr = watcher.communicate(timeout=8)
+                    self.assertEqual(0, watcher.returncode, stderr)
+                    self.assertEqual("changed", json.loads(stdout)["reason"])
+                finally:
+                    if watcher.poll() is None:
+                        watcher.terminate()
+                        watcher.communicate(timeout=8)
+        agent = self.p.state["agents"][identity["agent_id"]]
+        self.assertLess(agent["cursor"], sent["seq"])
+        self.assertEqual(["unfinished-request"], agent["pending"])
+        inbox = cli("inbox", *args)
+        self.assertEqual(0, inbox.returncode, inbox.stderr)
+        self.assertIn("Human steering → café 日本語", inbox.stdout)
+        payload = json.loads(inbox.stdout)
+        ack_file.write_text(json.dumps({"batch_id": payload["batch_id"]}), encoding="utf-8")
+        self.assertEqual(0, cli("call", "ack", *args, "--data-file", str(ack_file)).returncode)
+        self.cmd("control", {"agent_id": identity["agent_id"], "paused": True})
+        paused = cli("tripwire", *args, "--after", str(len(self.p.events)), "--max-seconds", ".05")
+        self.assertEqual(0, paused.returncode, paused.stderr)
+        self.assertEqual("paused", json.loads(paused.stdout)["reason"])
+        self.assertTrue(json.loads(paused.stdout)["control"]["agent_paused"])
+
 
 if __name__ == "__main__":
     unittest.main()

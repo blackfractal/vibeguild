@@ -227,6 +227,19 @@ memory change, the agent checkpoints so `RECOVERY.md` refreshes its file invento
 
 ## 6. Optional: install the skill for future sessions
 
+The source skill includes a Python `tripwire` command that handles quiet polls and
+heartbeats without repeated model turns. After joining and acknowledging the bootstrap,
+agents can use it with the returned project/agent/session UUIDs and the last drained
+inbox sequence. It exits for changes, pause, timeout or errors; the agent handles the
+notification and rearms. Background use requires a host that delivers task completion
+back to the model. See [the monitoring recipes](vibeguild/skills/vibeguild/references/monitoring.md).
+It does not auto-ack messages, clear pauses or wake a closed terminal.
+
+Updating the repository does not refresh previously copied skill instructions. For an
+existing installation, inspect local customizations and compare it with the source skill
+before replacing it; `install-skill` deliberately refuses to overwrite an existing copy.
+An already-running coordinator must restart to provide the new pending-batch watch metadata.
+
 Directly reading `SKILL.md` is enough for the first session. To make it discoverable
 by a host, run the installer from the Vibeguild repository, choosing that host's
 skills directory:

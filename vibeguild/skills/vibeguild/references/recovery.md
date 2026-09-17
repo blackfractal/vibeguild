@@ -120,6 +120,20 @@ Usage records from hosts are displayed separately as reported input/output total
 even metadata claims are not independently verified. Unknown usage stays unknown.
 Never add those numbers to the supplied-text estimate as if they were disjoint.
 
+The current `usage` action accepts immutable, non-overlapping records and deduplicates
+by agent/source/record ID. Do not periodically send cumulative totals under new IDs or
+expect an existing ID to update: either would misrepresent ongoing consumption. Prefer
+per-response records with stable IDs and explicit source semantics. Do not combine
+overlapping usage formats or count cached-input tokens twice. A current-context snapshot
+is different from cumulative usage. No automatic collector ships in this version.
+
+If usage is not exposed through host tools, make one bounded discovery attempt using
+the current session's supported metadata/log source, within the host's permissions.
+Inspect only usage records for that session; never load entire transcripts for telemetry.
+Record availability and source, report failure once, and retry discovery only when the
+session/configuration changes. A future collector should keep routine samples outside
+agent context and must not maintain a false appearance of active participation.
+
 Resume keeps lifetime project counters. A new context generation clears the cache
 of delivered ranges, not accounting history or pending obligations. Notes should
 carry task/message IDs and evidence locations so retrieval stays narrow.

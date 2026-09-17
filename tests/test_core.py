@@ -368,6 +368,13 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(Problem):
             self.call("presence", {"status": "working", "responding_to": incoming["event_id"]})
 
+    def test_preparing_response_after_bootstrap_ack_keeps_recipient_eligibility(self):
+        incoming = self.p.command("send", {"room": self.a["direct_room"], "body": "Please review"}, human=True)
+        batch = self.p.inbox(self.a["credential"], bootstrap=True)
+        self.call("ack", {"batch_id": batch["batch_id"], "pending": [incoming["event_id"]]})
+        self.call("presence", {"status": "working", "responding_to": incoming["event_id"]})
+        self.assertEqual(incoming["event_id"], self.p.state["agents"][self.a["agent_id"]]["responding_to"])
+
     def test_explicit_disconnect_records_clean_signoff_and_resume_clears_it(self):
         self.call("presence", {"status": "disconnected", "reason": "Host session ending"})
         agent = self.p.state["agents"][self.a["agent_id"]]

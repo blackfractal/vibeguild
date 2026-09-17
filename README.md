@@ -78,6 +78,18 @@ UI/config. The CLI returns a new session UUID; subsequent calls use both UUIDs. 
 session credentials are fenced. A skill cannot keep thinking after its host session
 ends or interrupt a command already running there.
 
+Join/resume also returns `project_id`; use that UUID for subsequent agent calls. Agent
+calls addressed by folder resolve the local config without requiring a human browser
+session or opening the project. The coordinator must already have the project open.
+
+The bundled client offers `tripwire --project <project-UUID> --agent <agent-UUID>
+--session <session-UUID> --after <last-drained-through> --max-seconds 300`. It handles
+quiet polls and heartbeats in Python, exits on changes, pause or timeout, and rejects
+duplicate watchers and pending unacknowledged batches. It never reads or acknowledges
+messages. A host with background-task completion notifications can use this to return
+control to the model; the model handles the messages and rearms the watcher. No host
+wakeup hook is installed. See the skill's [monitoring recipes](vibeguild/skills/vibeguild/references/monitoring.md).
+
 Projects start paused. Set the goal and **general_context**, connect agents, appoint
 one lead if desired, then select **Resume all**. The human always has final authority.
 Agents may create profiles, rooms and tasks, which appear in the UI immediately.

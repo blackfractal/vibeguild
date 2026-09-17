@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .core import Project, Problem, atomic, uid
 from .server import home, make_server
+from .monitor import tripwire
 
 
 def request(endpoint, route, body, credential=None):
@@ -52,7 +53,7 @@ def parser():
     recover = sub.add_parser("recover", help="Read the project/agent recovery file, even when the coordinator is offline")
     recover.add_argument("--project", required=True, help="Coordination folder or workspace containing .vibeguild")
     recover.add_argument("--agent", help="Your immutable agent UUID; omit to read the identity index")
-    for name in ("open", "join", "resume", "inbox", "watch", "fetch", "inspect", "call"):
+    for name in ("open", "join", "resume", "inbox", "watch", "tripwire", "fetch", "inspect", "call"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--project", required=True, help="Coordination folder or project UUID")
         if name not in ("open", "join", "resume"):
@@ -71,6 +72,9 @@ def parser():
         if name == "watch":
             cmd.add_argument("--after", type=int, required=True)
             cmd.add_argument("--timeout", type=float, default=30)
+        if name == "tripwire":
+            cmd.add_argument("--after", type=int, required=True, help="Last drained inbox through sequence")
+            cmd.add_argument("--max-seconds", type=float, default=300, help="Bound this wait (default 300); never automatically acknowledges")
         if name == "fetch":
             cmd.add_argument("--message", required=True)
             cmd.add_argument("--start", type=int, default=0)
@@ -166,11 +170,20 @@ def main(argv=None):
             else:
                 if not project_arg:
                     raise Problem("A project is required")
+                agent_id = getattr(args, "agent", None)
                 if Path(project_arg).is_dir():
-                    pid = request(endpoint, "/api/open", {"path": str(Path(project_arg).resolve())})["project"]
+                    if agent_id and args.command != "resume":
+                        root = Path(project_arg).resolve()
+                        if not (root / "vibeguild.json").is_file():
+                            root = root / ".vibeguild"
+                        try:
+                            pid = str(uuid.UUID(json.loads((root / "vibeguild.json").read_text("utf-8-sig"))["project"]["id"]))
+                        except (OSError, ValueError, KeyError, TypeError):
+                            raise Problem("Cannot resolve project UUID from this folder. Use --project <project UUID> from join/bootstrap; agents cannot open projects through the human UI session.")
+                    else:
+                        pid = request(endpoint, "/api/open", {"path": str(Path(project_arg).resolve())})["project"]
                 else:
                     pid = project_arg
-                agent_id = getattr(args, "agent", None)
                 credential = None
                 if agent_id and args.command != "resume":
                     if not getattr(args, "session", None):
@@ -190,6 +203,7 @@ def main(argv=None):
                     result = request(endpoint, "/api/command", {**base, "action": "register" if args.command == "join" else "resume", "args": data, "request_id": uid()})
                     atomic(home() / "sessions" / f'{pid}_{result["session_id"]}.json', {"project": pid, **result})
                     result.pop("credential", None)
+                    result["project_id"] = pid
                     result["coordinator_home"] = str(home())
                     result["next"] = "inbox --bootstrap; read general_context and controls before work"
                 elif args.command == "inbox":
@@ -200,6 +214,10 @@ def main(argv=None):
                     if not credential:
                         raise Problem("watch requires --agent")
                     result = request(endpoint, "/api/watch", {**base, "after": args.after, "timeout": args.timeout}, credential)
+                elif args.command == "tripwire":
+                    if not credential:
+                        raise Problem("tripwire requires --agent and --session")
+                    result = tripwire(request, endpoint, pid, agent_id, args.session, credential, home(), args.after, args.max_seconds)
                 elif args.command == "fetch":
                     if not credential:
                         raise Problem("fetch requires --agent and --session")
@@ -209,7 +227,7 @@ def main(argv=None):
                         raise Problem("inspect requires --agent and --session")
                     result = request(endpoint, "/api/inspect", {**base, "kind": args.kind, "key": args.key, "start": args.start, "limit": args.limit, "query": args.query}, credential)
                 elif args.command == "call":
-                    data = json.loads(Path(args.data_file).read_text("utf-8") if args.data_file else args.json)
+                    data = json.loads(Path(args.data_file).read_text("utf-8-sig") if args.data_file else args.json)
                     if args.body_file:
                         data["body"] = Path(args.body_file).read_text("utf-8")
                     result = request(endpoint, "/api/command", {**base, "action": args.action, "args": data, "request_id": args.request_id or uid()}, credential)

@@ -73,6 +73,17 @@ test('channels lists every room with the two coordination rooms pinned first',()
   assert(!additional.includes('room:agent_chat'));
   assert(!additional.includes('room:agent_scratch'));
 });
+test('direct rooms in the channel list open the agent tab instead of a second room tab',()=>{
+  run(`state.rooms={agent_chat:{id:'agent_chat',name:'agent_chat',kind:'global',members:[]},dm:{id:'dm',name:'@atlas',kind:'direct',members:['a']}};tabs=['room:agent_chat','room:dm','agent:a'];view='activity'`);
+  node('.sidebar-bottom').innerHTML='';
+  run(`render()`);
+  const additional=node('.sidebar-bottom').innerHTML;
+  assert(additional.includes('data-view="agent:a"'));
+  assert(!additional.includes('room:dm'));
+  assert(!additional.includes('#</span><span class="nav-text">@atlas'));
+  assert.strictEqual(run(`JSON.stringify(tabs)`),'["room:agent_chat","agent:a"]');
+  assert.strictEqual(run(`roomView('agent_chat')`),'room:agent_chat');
+});
 test('unread chat counts appear in the activity navigation and open tabs',()=>{
   run(`state.unread={agent_chat:{count:3,latest_seq:8}};tabs=['room:agent_chat'];render()`);
   const html=node('#app').innerHTML;

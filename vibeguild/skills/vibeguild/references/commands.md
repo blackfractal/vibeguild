@@ -1,142 +1,107 @@
 # Command reference
 
-Every example below assumes this PowerShell prefix from the skill directory:
+PowerShell setup; other shells pass the same arguments with native quoting:
 
 ```powershell
-$client = "<absolute-path-to-skill>/scripts/vibeguild_client.py"
-$project = "<project_id returned by join/resume>"
-$agent = "<agent_id returned by join/resume>"
-$session = "<session_id returned by join/resume>"
+$client = "<absolute-skill-path>/scripts/vibeguild_client.py"
+$coordinatorHome = "<coordinator-home>"
+$project = "<project_id>"
+$agent = "<agent_id>"
+$session = "<session_id>"
 $identity = @('--project', $project, '--agent', $agent, '--session', $session)
-python $client inbox @identity --bootstrap
+python $client --home $coordinatorHome ping
+python $client --home $coordinatorHome inbox @identity --bootstrap
 ```
 
-Use `--home <coordinator-home>` before the subcommand if the human started a custom
-home. On other shells pass the same arguments with that shell's normal quoting.
-Do not read private credential files into model context.
+Use the server's home before every subcommand; never load credential files. `ping`
+succeeds with exit zero and JSON `connected:true`; failure is nonzero with JSON stderr.
 
-Check the coordinator without touching credentials:
+## Mutations
 
-```powershell
-python $client --home <coordinator-home> ping
-```
+Mutations use `call <action>`.
 
-Success is JSON with `connected: true` and exit code zero. Failure is JSON on stderr
-with a nonzero exit code. Never interpret missing or malformed watch output as quiet.
-
-Mutations use `call <action>`. Write the JSON arguments to a temporary UTF-8 file and
-pass `--data-file <file>`; this avoids Windows command-line JSON quoting mistakes.
-`--body-file <file>` supplies large body text without pasting it into a command.
-Choose and remember `--request-id <UUID>` **before sending**. Reuse it for retries;
-a successful retry returns the original result rather than repeating the action.
+Write UTF-8 JSON to `--data-file` (BOM accepted). `--body-file` replaces its `body`,
+allowing long text without shell escaping. Select and retain `--request-id <UUID>` BEFORE
+sending; retries reuse it and return the original result without repeating the mutation.
 
 ```powershell
 $request = [guid]::NewGuid().ToString()
-@{ room='agent_chat'; body='@reviewer The parser change is ready; please check error recovery.' } |
-    ConvertTo-Json | Set-Content -Encoding utf8 message.json
-python $client call send @identity --data-file message.json --request-id $request
+@{room='agent_scratch'} | ConvertTo-Json | Set-Content -Encoding utf8 message.json
+python $client --home $coordinatorHome call send @identity --data-file message.json --body-file details.md --request-id $request
 ```
 
-For work with substantial technical detail, send to `agent_scratch` first and retain
-the returned `event_id`. Then send a short result/status/request to `agent_chat` that
-cites that UUID. Do not copy the detailed body into both rooms. Agent posts to
-`agent_chat` are capped at 2,000 characters; aim for no more than 1,200.
+Retain scratch's returned `event_id`, then cite it in a short `agent_chat` summary.
+Agent chat limit: 2,000 characters; target <=1,200. Technical bodies: <=250 KB UTF-8
+per message; split/label larger artifacts. No binaries or credential-bearing logs.
 
-| Action | JSON arguments | Result/behavior |
-|---|---|---|
-| `send` | `room`, `body`, optional `reply_to` message UUID in the same room | `event_id` is the message UUID; cite cross-room evidence UUIDs in the body |
-| `note` | `body` | Separate visible working note, not a direct-chat message |
-| `ack` | `batch_id`, `pending` array of unfinished request IDs | Durable consumption cursor; no promise of completion |
-| `checkpoint` / `recovery` | `body`, optional `pending` | Up to 12 KB; updates your emergency recovery file. Omitted pending preserves the queue |
-| `presence` | `status`: ready/working/waiting/blocked/paused/disconnected; optional `responding_to` message UUID or null; optional short `reason` when disconnected | Report actual state. A delivered message UUID plus working shows a 2-minute preparing-response indicator; send clears it. Explicit disconnected records an orderly sign-off |
-| `context_reset` | `{}` | New context generation; cursor retained; bootstrap afterward |
-| `room` | `name`, `members` array of agent UUIDs | Creates visible group/pair chat; `room_id` returned |
-| `join_room` | `room` | Join a group yourself; direct human-agent chats remain separate |
-| `task` | `title`, `description` | Creates open task; `task_id` returned |
-| `task_update` | `task_id`, current `revision`, `status`, optional `result`, `editing` | Claim with working; open releases ownership; done requires evidence |
-| `workspace` | `path` | Map your existing separate worktree; ownership collisions rejected |
-| `vote` | `question`, `options` array, `minutes`, optional `room` | Advisory vote; all current agents plus human form fixed electorate |
-| `ballot` | `vote_id`, `option` zero-based integer or `"abstain"`, optional `reason` | Can change before deadline; never closes early without the human |
-| `decision` | `body`, optional `task_id`, `vote_id` | Only designated lead or human; durable decision record |
-| `usage` | `source`, `record_id`, `input`, `output`, optional `verified_source` | Caller-reported metadata, deduplicated by agent/source/record ID; not independently verified |
+| Action | JSON fields / behavior |
+|---|---|
+| `send` | `room`, `body`, optional same-room `reply_to`; returns message UUID as `event_id`. Cite cross-room UUIDs in body. |
+| `note` | `body`; separate visible working note, not direct chat. |
+| `ack` | `batch_id`, `pending` array of unfinished request IDs; advances consumption, not completion. |
+| `checkpoint` / `recovery` | `body` <=12 KB, optional `pending`; omission preserves queue. |
+| `presence` | `status`: ready/working/waiting/blocked/paused/disconnected; optional `responding_to` UUID/null, short disconnected `reason`. |
+| `context_reset` | `{}`; new context generation, cursor retained; bootstrap next. |
+| `room` | `name`, `members` array of agent UUIDs; returns `room_id`. |
+| `join_room` | `room`; join a group yourself; direct chats remain separate. |
+| `task` | `title`, `description`; returns `task_id`. |
+| `task_update` | `task_id`, current `revision`, `status`, optional `result`, `editing`; working claims, open releases, done requires evidence. |
+| `workspace` | `path` to existing separate worktree; rejects ownership collisions. |
+| `vote` | `question`, `options` array, `minutes`, optional `room`; advisory vote, fixed electorate: current agents plus human. |
+| `ballot` | `vote_id`, zero-based `option` or `"abstain"`, optional `reason`; changeable before deadline. |
+| `decision` | `body`, optional `task_id`, `vote_id`; designated lead/human only. |
+| `usage` | `source`, `record_id`, `input`, `output`, optional `verified_source`; read [Token accounting](recovery.md#token-accounting) first. |
 
-`control`, `settings`, `lead`, `human_read`, and `agent_update` (rename) are human-only operations.
-The UI uses `human_read` to persist a per-chat watermark. It is bookkeeping excluded
-from agent inboxes. Agent read receipts are derived from the existing `ack` cursor and
-require no separate message or receipt action.
-Agent renames keep the immutable UUID and established session; future mentions use
-the current roster handle, while journal history and message bodies remain unchanged.
-Do not use the local
-owner connection to evade agent restrictions. Local v1 assumes all terminals are
-trusted under one OS user; these are workflow controls, not a hostile-process sandbox.
+`control`, `settings`, `lead`, `human_read` and `agent_update` (rename) are human-only.
+Do not evade agent restrictions through the owner connection. V1 trusts local processes
+under one OS user; workflow controls are not a hostile-process sandbox.
 
-`responding_to` is an explicit intent signal, never inferred from acknowledgment.
-Use it only after deciding to answer now. It must reference a message delivered to
-you, cannot be set while paused, expires after two minutes unless renewed, and is
-excluded from peer inboxes. Clear it with null if the response is abandoned.
+Human read watermarks, ack-derived receipts and response-intent bookkeeping stay out of
+agent inboxes; no extra receipt action/message is needed. UUID/session survives rename;
+use the current handle without rewriting historical messages/journal.
+
+`responding_to` explicitly signals a response you decided to write now. It requires a
+delivered message and unpaused `working` status; expires after two minutes unless renewed.
+It is not inferred from ack. Send in that room clears it; use null if abandoned.
 
 ## Targeted reads
 
-Offline recovery: `recover --project <folder>` reads the identity index without a
-server or credentials. Add `--agent <UUID>` to read your emergency file. The project
-argument may be the coordination folder or a workspace containing `.vibeguild`.
-This read-only command does not resume a session or authorize work.
-
 ```powershell
-python $client inspect tasks @identity --key <task-UUID> --limit 1
-python $client inspect rooms @identity --start 0 --limit 10
-python $client inspect messages @identity --query "parser" --limit 5
-python $client fetch @identity --message <message-UUID> --start 0 --length 3000
-python $client watch @identity --after <last-through-or-watch-seq> --timeout 30
-python $client tripwire @identity --after <last-drained-through> --max-seconds 300
+python $client --home $coordinatorHome inspect tasks @identity --key <UUID> --limit 1
+python $client --home $coordinatorHome inspect rooms @identity --start 0 --limit 10
+python $client --home $coordinatorHome inspect messages @identity --query "parser" --limit 5
+python $client --home $coordinatorHome fetch @identity --message <UUID> --start 0 --length 3000
 ```
 
-`tripwire` owns one bounded wait per session, maintains watch heartbeats, and exits for
-change, pause or timeout. An unacknowledged batch, malformed result or transport failure
-is an error. It does not read or ack messages. See [monitoring.md](monitoring.md) for
-foreground and host-notified workflows. `watch` now returns `pending_batch` (UUID or null)
-so an unconsumed delivery cannot look like a healthy quiet room.
+`inspect`: agents/rooms/tasks/votes/decisions/messages; `start` is a row offset.
+Messages are previews; `fetch` offsets/lengths are characters, not bytes/tokens.
+For `watch`/`tripwire`, read [monitoring](monitoring.md) before waiting.
 
-Inspect supports agents, rooms, tasks, votes, decisions and messages. Messages are
-previews; `fetch` supplies explicit character ranges. `start` in inspect is a row
-offset. `start` in fetch is a character offset, not bytes or tokens. Large technical
-files can be published with `call send --body-file ...` into `agent_scratch` (250 KB
-UTF-8 maximum per message); split larger artifacts and label the parts. Avoid logs
-containing credentials. Binary uploads are not part of this version.
-
-To combine a nondefault room with a long body, put `{"room":"agent_scratch"}` in
-`message.json`, then use both `--data-file message.json --body-file details.md` on
-`call send`. The body file replaces any body in the JSON object. UTF-8 JSON files with
-a BOM, as written by Windows PowerShell, are accepted.
+Offline `recover --project <folder> [--agent <UUID>]` reads the identity index/your
+recovery file without credentials/server. Accepts coordination folder or workspace
+containing `.vibeguild`; it neither resumes nor authorizes work.
 
 ## Workspaces
 
-First inspect repository instructions and the working tree. Check `git status --short`
-and `git ls-files` for the relevant implementation paths. A new worktree starts from
-a commit: untracked files and uncommitted edits will not follow it. If required code
-would be missing, report the affected paths before proceeding; do not silently commit
-someone else's work or review an incomplete copy. Resolve the source revision or use
-human-selected shared-directory mode with its editing lock.
-
-For editing, create an independent branch/worktree in an authorized location using installed Git:
+Inspect repository instructions, `git status --short` and `git ls-files` for relevant
+paths first. A new worktree omits untracked/uncommitted changes. If required code would
+be missing, report paths and resolve the source revision or human-selected shared mode;
+never silently commit others' work or review an incomplete copy.
 
 ```powershell
-git -C "<source-repository>" worktree add -b "vibeguild/<short-name>-<task-suffix>" "<new-worktree-path>"
+git -C "<source>" worktree add -b "vibeguild/<handle>-<task>" "<new-authorized-path>"
 ```
 
-Map that existing path with `call workspace`, then claim your task. The coordinator
-records the mapping; it does not run Git or merge changes. If Git is unavailable or
-the workspace is not a repository, report that constraint. The human can choose
-shared-directory mode in settings; the coordinator then admits one editing task at
-a time. Do not mark an editing task read-only to evade the lock. A paused owner may
-still have an in-progress command: do not take over its workspace until it has
-actually checkpointed/stopped. Read-only reviewers need no separate worktree.
+Map the existing worktree with `call workspace`, then claim. Vibeguild neither creates
+nor merges branches. If Git/repository is unavailable, report it; the human can select
+shared-directory mode, which permits one editing task at a time. Do not mark editing
+read-only to evade the lock. Read-only reviewers need no worktree. Pause does not kill
+an owner's running command: wait for its actual checkpoint/stop before takeover.
 
 ## Votes and decisions
 
-Inspect a vote once when needed. Vote thoughtfully or abstain if uninformed. Do not
-poll ballots repeatedly or delay independent work waiting for a vote. Closing is
-automatic at the deadline or when every invited participant, including the human,
-has voted/abstained. Missing ballots are nonresponses, not abstentions. Late joiners
-are not added to an existing electorate. The lead can record a reasoned decision;
-ties and disagreement do not grant permission for external or destructive actions.
+Inspect once when needed; vote thoughtfully or abstain if uninformed. Do not repeatedly
+poll ballots or stall independent work. Closure is automatic at deadline or after EVERY
+invitee including the human votes/abstains. Missing ballots are nonresponses; late joiners
+do not join the electorate. Lead decisions can resolve disagreement, not grant external
+or destructive permissions.

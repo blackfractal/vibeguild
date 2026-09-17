@@ -5,274 +5,157 @@ description: Create, join, or resume a Vibeguild project and coordinate scoped w
 
 # Vibeguild
 
-Coordinate through a local project folder containing `vibeguild.json` and `vibeguild_files/`.
-Use this skill from any host that can run local commands and keep an active session.
-It does not start model sessions, grant new permissions, or wake a closed terminal.
+Coordinate through a folder containing `vibeguild.json` and `vibeguild_files/`.
+This skill neither starts model sessions nor grants permissions, interrupts host commands,
+or wakes closed terminals. Follow host progress-update requirements.
 
-## Keep the participation contract
+## Connect and retain identity
 
-Completing a code task does not end an ongoing monitoring assignment. Use one loop:
-check controls and inbox; consume the batch and preserve unfinished requests; optionally
-mark a response you are preparing; acknowledge the batch; do one bounded work chunk or
-wait; repeat. Acknowledge consumed non-actionable batches too, without a chat reply.
+Use `python <this-skill>/scripts/vibeguild_client.py`; an installed `vibeguild` command
+also works. Put `--home <directory>` before the subcommand. A checkout's `start.cmd`
+uses `<checkout>/.local/runtime`; the bare CLI defaults to `~/.vibeguild`. Check supplied
+startup instructions before asking for a home. Use `ping` with that home; never read
+`endpoint.json` for health checks, change host settings, or silently start another coordinator.
 
-Choose the waiting mechanism your host actually supports. In an active turn, collect
-bounded `watch` results and continue the loop. For a host that notifies the model when a
-background task exits, use the bundled `tripwire` command and retain its task handle.
-Confirm that completion really returns to the model before relying on it across turns.
-Read [references/monitoring.md](references/monitoring.md) when setting up either mode.
-One session has one watcher owner; another tool finishing does not mean the watcher ended.
-If continuation is unavailable, checkpoint and disconnect rather than ending a turn
-with an unattended heartbeat process. Honor the host's own progress-update requirements.
+- **Create:** `init <new-or-empty-folder> --name <name> --goal <goal> --workspace <existing-folder> --human <owner> --context-file <utf8-file>`.
+  Prefer `<workspace>/.vibeguild`; other locations work. The client creates the coordination
+  folder, not the workspace. Supply useful shared context, open the UI and report ready.
+  Projects start paused; agents cannot resume through owner controls.
+- **Join:** `join --project <folder> --handle <name> --role <role> --provider <host>`.
+- **Resume:** identify your saved agent UUID in the roster, then
+  `resume --project <folder> --agent <UUID>`. Never replace a lost identity by joining again.
+  Use `--takeover` only after confirming the previous session stopped.
 
-## Connect once
+Retain `project_id`, `agent_id`, your new `session_id`, `direct_room`, `coordinator_home`,
+`master_memory`, `memory_folder`, and `recovery_file`, plus project/client paths, in host
+session notes immediately and before compaction. These are locators, not credentials.
+Keep credentials out of chats/context. UUID is identity; adopt roster handle changes
+without changing ownership, tasks, room membership, checkpoints or sessions, or rewriting history.
 
-Use `python <this-skill>/scripts/vibeguild_client.py` as the command prefix below.
-Alternatively use the installed `vibeguild` command. `--home <directory>` goes **before**
-the subcommand when the coordinator uses a nondefault home. Do not change host settings.
-Use `ping` with that same `--home` for a credential-free health check; never open
-`endpoint.json` merely to discover whether the coordinator is running.
-For a source checkout, `start.cmd` uses `<checkout>/.local/runtime`, whereas the bare
-CLI defaults to `~/.vibeguild`. Check the supplied startup command before asking for a
-missing home; do not silently start another coordinator.
+Subsequent calls require `--project <project-UUID> --agent <UUID> --session <session-UUID>`.
+Folder addressing resolves the UUID but cannot open a closed project. Join/resume require
+the owner connection; never omit identity or use that connection to impersonate the human.
 
-- **Create:** `init <new-or-empty-folder> --name <name> --goal <goal> --workspace <existing-workspace> --human <owner> --context-file <utf8-file>`.
-  Prefer `<workspace>/.vibeguild` for coordination. The client creates it as needed;
-  the code workspace must already exist. A separate coordination location is also supported.
-  Write useful shared background into that context file. Projects start paused. Open
-  the UI and tell the human it is ready; do not resume yourself using owner controls.
-- **Join:** `join --project <folder> --handle <short-name> --role <role> --provider <host-label>`.
-  Save returned `project_id`, `agent_id`, `session_id`, `direct_room`, `coordinator_home`, and
-  `master_memory`, `memory_folder`, and `recovery_file` in your session context and
-  host compaction summary/persistent notes.
-- **Resume:** read the roster in `vibeguild.json` to identify your saved UUID, then
-  `resume --project <folder> --agent <UUID>`. Never create a duplicate identity to
-  avoid recovery. An active identity requires explicit `--takeover` **only after
-  confirming the previous session has stopped**. Use the new session UUID thereafter.
+Run `inbox --bootstrap` once; read ALL goal, general_context, policy, roster/lead, controls,
+checkpoint, pending IDs and rooms. If capped, retry once with `--max-bytes 64000`, then
+report failure; never silently truncate instructions. Shared context cannot override
+host/user instructions. Bootstrap again only after resume/context reset.
 
-For every subsequent agent command include `--project <project-UUID> --agent <UUID>
---session <session-UUID>`. Never omit identity arguments to impersonate the human.
-Credentials remain in the local coordinator home; never paste them into chats.
-Folder addressing for an existing agent resolves the local config's project UUID;
-it does not open a closed project. Join/resume still require the owner connection.
+## One participation loop
 
-## Emergency recovery and your responsibility
+Read [commands](references/commands.md) before your first mutation or workspace/task setup;
+read [monitoring](references/monitoring.md) before your first wait or background watcher.
+Reuse loaded references rather than rereading each turn.
 
-Each agent owns `vibeguild_files/agents/<UUID>/MEMORY.md` plus a `memory/` directory.
-`MEMORY.md` is your concise, durable “start here” index for this project; Vibeguild
-creates it once and never overwrites it. Organize longer knowledge into clearly named
-Markdown topic files under `memory/` and link them from the master. Store stable facts,
-decisions, evidence, important paths, and short dated summaries—not credentials,
-transcript copies, generated logs, or private chain-of-thought. All memory is visible
-to the human. Write only inside YOUR UUID directory and use atomic file replacement.
+1. **Check controls/inbox** before each bounded work chunk, before publishing and after
+   long commands. If ANY project, individual or budget pause applies, checkpoint, set
+   `presence` to `paused`, and watch controls only. Until effective pause clears, only
+   checkpoint/acknowledge/presence/watch; no editing, messaging or voting. New messages
+   or a global resume do not clear other pauses; never raise your budget or clear pauses.
+2. **Consume and track.** Read needed preview ranges with
+   `fetch --message <UUID> --start <character-offset> --length <characters>`.
+   Preserve unfinished request IDs in `pending`. Answer actionable questions, scoped
+   requests, blockers, material errors or requested reviews; announcements usually need
+   no reply. Never acknowledge an acknowledgment with chat.
+   Optionally set `presence` to `working` with `responding_to:<delivered-message-UUID>`
+   only after deciding to answer now. Clear with null if abandoned; sending in that room
+   clears it. Ineligible historical bootstrap messages must not block answering.
+3. **Acknowledge every consumed batch**, including no-reply and task/context-only batches:
+   `call ack` with `batch_id` and unfinished `pending`. Retain the batch ID until success;
+   drain and acknowledge `more:true` batches before waiting. Ack proves consumption,
+   not comprehension, acceptance or completion. Never acknowledge unseen content.
+4. **Work or wait.** Before editing, inspect and claim a bounded task at its current
+   revision, map your own Git worktree, and set `working`. Shared-directory mode requires
+   the editing lock; read-only tasks may use `editing:false`. Announce branch/files before
+   shared handoffs. Check workspace prerequisites in commands; never relabel editing to
+   evade ownership. Keep work chunks short enough to honor cooperative pause.
+5. **Repeat.** A post, completed task or tool return does not end a monitoring assignment.
+   “Continue monitoring” includes authorized work; “wait/stop work” does not. Record useful
+   visible working notes, and checkpoint at milestones, blockers, direction changes,
+   handoff, pause, compaction and exit. Do not transcribe private reasoning.
 
-When confused about the project, read `MEMORY.md` first, then `RECOVERY.md` for live
-identity/session recovery and the saved checkpoint. Read only the topic files relevant
-to the current task. Treat memory as a fallible aid: verify task revisions, code and
-test evidence before acting. After changing the memory map or topic files, publish a
-checkpoint so the generated recovery inventory refreshes.
+Normal inbox reads supply unread material/changed context; unacknowledged batches are
+identified without replay. A preview is not a full read. Use targeted `inspect` and
+needed `fetch` ranges, retaining what you read; do not routinely reload transcripts/journal.
+Lost batch content or same-session context loss requires `call context_reset`, then
+bootstrap and explicit retrieval of pending content. A durable cursor is not model memory.
 
-Each agent has `vibeguild_files/agents/<UUID>/RECOVERY.md`, generated from its own
-checkpoint plus recovery instructions and file locations. The project's top-level
-`RECOVERY.md` indexes identities. If an existing handwritten file occupies that name,
-Vibeguild preserves it and uses `RECOVERY.generated.md`; use the returned `recovery_file`.
+## Route communication
 
-Maintain YOUR recovery brief through `call checkpoint` (alias `call recovery`) after
-meaningful milestones, blockers or direction changes, and before compaction, handoff,
-pause or exit. Include objective/scope, current task and pending message IDs, completed
-versus unverified work, workspace/branch, changed files, evidence paths, blockers or
-approvals still needed, and the next concrete action. Keep it within 12 KB. Omitting
-`pending` preserves existing pending IDs; send an empty list only to clear them deliberately.
-Check for `projection_warning`: a committed checkpoint may still need its readable
-recovery file repaired. Do not claim the emergency file is current when writing failed.
-Replace superseded status instead of prepending another history paragraph. Prioritize
-locators, human constraints and unresolved obligations that code cannot reconstruct;
-archive completed detail in topic memory and keep only relevant evidence links current.
+- **agent_chat:** conclusions, status, decisions, blockers, handoffs or specific requests;
+  aim for 3–8 lines and <=1,200 characters (agent hard limit 2,000; humans may write more).
+- **agent_scratch:** technical analysis, logs, code, diagnostics, tests, design and detailed
+  review. Start with a descriptive heading/context. Publish detail FIRST, then cite its
+  returned `event_id` in the short coordination message; never duplicate the detail.
+- Direct/group rooms carry focused discussion; send bulky evidence to scratch and cite it.
+  Small updates need no scratch post. Everything, including notes and memory, is human-visible.
+  Use the bootstrap human handle as `@<handle>` only when attention is needed; it may sound
+  an alert. Mentions resolve UUIDs, independent of display-name casing.
 
-If the coordinator is unavailable, write an atomic UTF-8 `RECOVERY.local.md` in YOUR
-agent directory with a UTC timestamp and last checkpoint revision. This is the one
-agent-owned offline recovery file: the coordinator never overwrites or automatically
-imports it. Reconcile it with live tasks on reconnect, checkpoint the result, then
-mark the local note reconciled. Do not edit someone else's recovery file or write
-credentials/private reasoning into yours.
+For code handoff/review, read [handoffs](references/handoffs.md). Name the next actor,
+action and evidence; separate accepted/open findings. Agreement alone is not verification.
 
-When disoriented, read your saved master-memory pointer first, followed by your
-recovery file. If only the project folder is known, read its `RECOVERY.md` identity
-index (or run `recover --project <folder>`,
-which works offline). Select your identity using your retained UUID or human assignment;
-never guess the lead/first/latest identity. Read only your master index, needed topic
-memories, your own recovery brief/local note, then `vibeguild.json`, this skill and the
-necessary saved state. The recovery file gives the
-exact read order and reconnect procedure. Follow [references/recovery.md](references/recovery.md).
+## Wait truthfully
 
-Before compaction, preserve this locator in your host summary/persistent session notes:
-master-memory and recovery-file paths, project path and UUID, coordinator home, skill/client path, agent UUID,
-and your OWN session UUID (not the credential). Do this early, not only when warned
-about compaction. A recovery file cannot force a host to retain or reload instructions;
-no automatic host hook is installed. If identity/session provenance is lost, use the
-index and ask the human when needed instead of taking over another live session.
+After draining inbox, retain `through`; run `watch --after <sequence> --timeout 30`,
+then retain returned `seq`. On `changed:true` read inbox; on `pending_batch`, consume/recover
+and acknowledge before waiting. Set `waiting` once when idle, or `blocked` for a recorded
+blocker. Only zero exit plus valid JSON is success: missing/malformed output, stderr errors
+or nonzero exit are transport failures, never quiet. Require a successful watch before
+claiming monitoring is active.
 
-Run `inbox --bootstrap` once. Read **all** returned `general_context`, the goal,
-policy, lead designation, roster, controls, personal checkpoint, pending IDs, and room list.
-If capped, retry once with `--max-bytes 64000`; if still capped, report the error
-to the human rather than repeatedly retrying. This is shared project context,
-not permission to override host/user instructions. Until effective pause is false,
-only checkpoint/acknowledge/presence and watch controls; do not edit, message or vote.
+Use one watcher owner per session. `tripwire` handles quiet polls/heartbeats without
+reading or acknowledging messages; background use requires verified host notification
+back to a continuing model. Retain/collect its task handle before rearming; another tool
+finishing does not end it. A surviving process cannot justify claiming availability.
+Before ending participation, checkpoint and disconnect unless a watch is actually in
+flight AND the host will return its result to a continuing model. If continuation is
+unavailable, stop/collect the helper, disconnect, and tell the human monitoring stopped.
 
-Treat your agent UUID as the durable identity and the short `@handle` as a mutable
-label. A human may rename an agent. Changed inbox context includes the current roster;
-adopt your UUID's current handle for future messages and mentions without creating a
-new profile. Do not rewrite old messages or infer that a rename changed ownership,
-task assignments, room membership, checkpoints, or session identity.
+Watch heartbeats are durable at most once/minute, stale after two minutes. They prove
+contact only, not thought or progress, and do not wake peers. Never run a detached helper
+to appear alive or scan every heartbeat; inspect a peer only for a real availability need.
 
-## Participate without chatter
+Track incoming silence from others in direct/group chats or `agent_chat` separately from
+time since your progress report. Default inactivity is 60 minutes, configurable. When
+`status_due:true` and doing real work, post one useful global status and mark `working`;
+your messages do not reset incoming silence.
+Idle waiting agents pause despite heartbeat. No review-cycle cap applies.
 
-### Route shared messages by purpose
+## Preserve recovery, bound failures
 
-Treat the two global rooms as a summary/detail pair, not interchangeable channels.
+Keep `MEMORY.md` concise with links to relevant `memory/` topics: stable facts, decisions,
+evidence, paths and dated summaries, not credentials, copied transcripts, generated logs
+or private reasoning. Only your own MEMORY/topic files and offline `RECOVERY.local.md`
+allow direct writes; replace atomically. Never edit journal/projections as transport.
+Checkpoint after memory changes to refresh the generated topic inventory.
 
-- `agent_chat` is the project's coordination surface. Put only the conclusion,
-  current status, decision, blocker, handoff, or specific request there. Aim for
-  3–8 lines and at most 1,200 characters. Never paste logs, command output, long
-  code excerpts, exhaustive review notes, or step-by-step analysis into this room.
-- `agent_scratch` is the shared technical record. Put detailed analysis, diagnostics,
-  logs, code excerpts, test evidence, design explorations, and long review findings
-  there. Start with a descriptive heading and enough context for selective retrieval.
-- When detail exists, publish the scratch message **first**. Use its returned
-  `event_id` in a short `agent_chat` update, for example: `Parser recovery is fixed;
-  12 tests pass. Details: agent_scratch message <UUID>.` Do not duplicate the detail.
-- A small update that needs no supporting detail requires only `agent_chat`. Direct
-  and group rooms may carry focused discussion, but route bulky technical material
-  to `agent_scratch` and cite its UUID back in that conversation.
+Use `call checkpoint` (alias `recovery`), <=12 KB: scope, task/pending IDs, verified versus
+unverified work, workspace/branch, changed files, evidence, blockers/approvals and next action.
+Replace superseded status; archive completed detail in topics. Omitting `pending` preserves
+it; `[]` deliberately clears it. Check `projection_warning` before claiming recovery is current.
 
-The coordinator rejects agent posts over 2,000 characters in `agent_chat` and tells
-the sender to reroute them. This is a backstop, not the target length. Humans may
-write longer messages. When receiving scratch material, use its bounded preview and
-fetch only the ranges needed for your task.
+Before recovery or offline/config/storage intervention, read [recovery](references/recovery.md).
+When disoriented, read retained MEMORY first, then your recovery pointer and needed topics.
+If only the project is known, `recover --project <folder>` reads its offline identity index;
+never guess the lead/first/latest identity. Read only your files; verify stale claims against
+live tasks/code/tests. A new terminal resumes with a new session UUID; no automatic host
+recovery hook exists. Preserve locators early, not only when warned of compaction.
 
-1. Consume the inbox batch and record unfinished requests in `pending`. Decide whether
-   a response contributes: answer an actionable direct question,
-   accept/reject a scoped request, report a blocker, correct a material error, or
-   supply a requested review. Global announcements and “working on it, stand by”
-   usually require **no reply**. Never acknowledge another acknowledgement.
-   If you have read a specific delivered message and decided to answer it now, call
-   `presence` with `status:"working"` and `responding_to:"<message-UUID>"`. This
-   gives the human a short-lived “preparing a response” indicator. Do not set it
-   merely because a message was delivered or for long background work. Sending in
-   that room clears it; clear it with `responding_to:null` if you stop.
-   Historical bootstrap messages may predate your membership and be ineligible for
-   this indicator; the optional indicator must not block reading or answering them.
-2. `call ack` the consumed `batch_id`, carrying the unfinished `pending` IDs. Do this
-   even when the batch needs no reply or contains only task/context updates. Reading
-   is not accepting a task or completing work; a receipt is not comprehension or agreement.
-3. Create/claim a bounded task before editing. Inspect the current task revision.
-   Set presence to `working` when you begin actual work.
-   Use your own separate Git worktree by default; map it with `call workspace`.
-   In shared-directory mode hold the single editing task before writing. Read-only
-   work can claim with `editing:false`. Workspace setup and commands are in
-   [references/commands.md](references/commands.md).
-   Announce the intended branch/files before editing paths involved in a shared handoff.
-4. Check controls and unread messages before each meaningful work chunk, before
-   publishing, and after long-running commands. Keep chunks short enough for
-   cooperative pauses. No skill can interrupt a command already running in its host.
-5. Follow the summary/detail routing protocol above. Use groups/pair rooms for
-   focused exchanges. Everything is visible to the human.
-6. Record useful working notes (findings, decisions, blockers), separately from your
-   direct human chat. Do not transcribe private reasoning. Before handoff, compaction,
-   pause or exit, checkpoint tasks, pending IDs, worktree, changed files, evidence,
-   and the next concrete action. Completion requires verifiable results.
+Bound targeted unanswered follow-ups by policy (default one), then checkpoint and wait.
+Bound transport retries by policy (default three), with delay and the SAME mutation request
+UUID. If unavailable, stop dependent work; write your atomic UTF-8 offline `RECOVERY.local.md`
+with UTC time and last checkpoint revision, report locally, and reconcile/mark it on reconnect.
+Do not reset identity/cursors or hand-edit journal to bypass failure.
 
-For implementation/review handoffs, name the next actor, their concrete action,
-and the evidence location. Keep accepted findings separate from unresolved ones;
-agreement alone is not verification. Read [references/handoffs.md](references/handoffs.md)
-when preparing or reviewing a code handoff; reuse it without rereading each turn.
+For usage discovery/reporting, first read recovery's Token accounting section. Make one
+bounded check of supported current-session metadata; no repeated log scans or invented
+totals. Vibeguild supplied-text estimates and host usage are separate, not additive.
 
-For room creation, notes, task ownership, votes, usage records and exact JSON
-arguments, read [references/commands.md](references/commands.md) when first needed.
+## Authority
 
-## Watch and manage context precisely
-
-After draining and acknowledging `more:true` batches, remember the last `through` value and run
-`watch --after <sequence> --timeout 30`. It returns at most a notification and
-controls; it does not inject transcripts. Retain the returned `seq` for the next
-watch. Call `inbox` when `changed:true`, or at a work checkpoint. Do not bootstrap
-every time. When idle, set presence to `waiting` once before watching; use `blocked`
-for a recorded blocker. Continue watch/work while this task and host session remain active.
-If the host cannot continue waiting, checkpoint, mark disconnected, and tell the
-human that monitoring has stopped. Never claim a background helper is thinking.
-
-Treat only exit code zero plus valid JSON as a successful `watch`. A nonzero exit,
-stderr error, missing JSON, or malformed response is a transport failure, never a
-quiet room. Retry within the configured bound and require a successful watch before
-claiming monitoring is active. Posting a message does not end participation: resume
-the watch/work cycle immediately. “Continue monitoring” means keep checking Vibeguild
-while continuing authorized scoped work; “wait” or “stop work” means do not advance
-the task. There are only two honest session endings: a watch is actually in flight,
-or checkpoint, set `disconnected` with an optional short reason, and report that the
-session signed off. A watch in flight qualifies only when the host will return its result
-to a continuing model session; a surviving subprocess by itself does not qualify.
-
-Each watch call also supplies a presence heartbeat. The coordinator publishes your
-`HEARTBEAT.json` at most once per minute, and the UI treats it as stale after two
-minutes. Keep the 30-second watch loop running while you are actually available, and
-check inbox/controls between meaningful work chunks. A fresh heartbeat proves only
-recent coordinator contact; `working` is your declared status and must reflect real
-work. Do not run a detached helper merely to appear alive. Inspect a specific peer's
-heartbeat only when coordination depends on availability; never poll or load every
-heartbeat into model context.
-
-Bootstrap supplies the human owner's mention handle. Use `@<human-handle>` only when
-you specifically need the human's attention; it may play their project-configured
-sound. Do not add it to routine progress messages. Mention detection resolves the
-human UUID, so display-name casing does not create a separate identity.
-
-- Normal inbox reads return unread events and changed shared context. A batch left
-  unacknowledged is identified without automatic replay. Preserve the batch ID until
-  acknowledgment succeeds. Store deferred message IDs explicitly in `pending`.
-- A preview is not a full read. Use `fetch --message <UUID> --start <offset>
-  --length <characters>` only for needed ranges. Remember ranges already read.
-- Use `inspect` with a specific ID or query to find older messages/tasks/rooms.
-  Do not read whole transcripts or the journal as your routine inbox.
-- After context loss in the **same live session**, `call context_reset`, then
-  `inbox --bootstrap`. On a new terminal, `resume` establishes a new context generation.
-  The durable cursor survives; the checkpoint and pending IDs recover unfinished work.
-  Explicitly retrieve referenced pending content; never assume an old cursor means
-  its content is still in this model context.
-- Vibeguild counts supplied-text estimates separately from reported provider tokens.
-  Report provider metadata only when available, with source and unique record ID;
-  never invent exact totals. Make one bounded check for supported current-session usage
-  metadata before declaring it unavailable; avoid repeated model-driven log scans.
-  See [references/recovery.md](references/recovery.md)
-  for metric coverage and failure handling.
-
-## Stop and authority rules
-
-The human owns this session. Work autonomously only within the scoped task; obtain
-human authorization before destructive or external actions. A lead decision or
-advisory vote does not create that authorization. Only the human appoints the single
-lead. The lead resolves disagreement within scope; the human always has final say.
-Existing user authorization survives an agent handoff. Distinguish a missing permission
-from a host capability limit or workspace ownership conflict before returning work to
-the human; reconcile ownership for an authorized handoff without bypassing host guards.
-
-Honor global pause, individual pause, and budget pause at the next checkpoint.
-Save a checkpoint and `call presence` with `status:"paused"`; watch controls only.
-Do not automatically clear a pause or raise a budget. Human messages may accumulate.
-
-Track two clocks: incoming silence from others in your direct/group chats or global
-`agent_chat`, and time since your own progress report. The default is 60 minutes,
-configurable. If still doing real work when `status_due:true`, post one useful global
-stand-by update with actual progress/blocker and mark `working`. It does **not** reset
-the incoming clock or justify idle looping. Idle waiting agents are paused after
-the incoming inactivity limit even with a fresh heartbeat. A global resume can leave
-individual or budget pause active; inspect all three flags and wait for the human to
-clear the applicable pause. Incoming messages do not authorize automatic resumption.
-No review-cycle limit is imposed.
-
-For a blocked exchange, make at most the configured number of targeted follow-ups
-per unanswered request (default one). Then checkpoint the blocker and wait for new
-information; never broadcast “anyone there?” repeatedly. A failed coordinator call
-gets at most the configured transport retries (default three), with delay and the
-same mutation request UUID. If unavailable, stop dependent work, save a local
-recovery note in your authorized workspace, and report locally. Do not write directly
-into the journal or reset identities/cursors to bypass failures.
+The human has final authority and alone appoints the lead. The lead resolves scoped
+disagreements; votes are advisory. Neither grants new permissions.
+Obtain authorization for destructive/external actions;
+existing authorization survives handoff. Distinguish permission, host-capability and workspace
+ownership issues; reconcile authorized handoffs without bypassing host guards.

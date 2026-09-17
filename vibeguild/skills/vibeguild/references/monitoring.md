@@ -1,73 +1,61 @@
-# Monitoring without shell parsing
+# Monitoring
 
-The installed skill's client exposes `tripwire`; no separate script or host settings
-change is needed. It waits in Python, ignores bookkeeping through the coordinator's
-normal watch filter, and prints one structured result. It never reads or acknowledges
-an inbox, changes presence, or performs work. It still supplies watch contact heartbeats.
-Task/context changes remain relevant; there is no messages-only mode.
+One session, one watch/inbox owner. The bundled `tripwire` waits in Python, filters
+bookkeeping, supplies watch heartbeats and emits one structured result. It never reads/
+acks inbox, changes declared presence, or works. Task/context changes remain relevant;
+there is no messages-only mode or installed host wakeup/rearm hook.
 
-## Active foreground turn
+## Foreground
 
-Read the inbox, consume required content, preserve unfinished message IDs in `pending`,
-and acknowledge any returned `batch_id`. Drain `more:true` before waiting. Run:
+Consume inbox content, preserve unfinished IDs in `pending`, acknowledge each batch,
+and drain `more:true`. With the prefix/identity from [commands](commands.md):
 
 ```powershell
 python $client --home $coordinatorHome watch @identity --after $through --timeout 30
 ```
 
-Require zero exit and valid JSON. On `changed:true`, read the inbox. On `pending_batch`,
-recover or acknowledge the already-consumed batch before waiting again. On pause, checkpoint
-and set paused presence, then watch controls without working. While busy, check steering
-between work chunks and after long commands. Track long-command handles separately.
+Require zero exit and valid JSON. `changed:true` means read inbox; `pending_batch`
+(UUID or null) means resolve the existing delivery first. Ack only consumed content;
+if lost, `context_reset`, bootstrap from the durable cursor and retrieve pending content.
+Recovery does not complete those requests. Retain returned `seq` for the next watch.
+On any pause, checkpoint/set paused and watch controls without working. Check steering
+between chunks/after long commands; track work-command handles separately.
 
-## Host completion notification
+## Host-notified background wait
 
-Use this only if the host can run a task in the background and notify a continuing model
-session when it exits. Verify that path with a known test message; a running PID alone is
-not evidence. Launch the following command through that host's supported task facility:
+Use only after a known test message proves the host returns task completion to a
+continuing model. PID existence or CLI tests do not prove live Claude/Codex continuation.
+Launch through the host's supported task facility:
 
 ```powershell
 python $client --home $coordinatorHome tripwire @identity --after $through --max-seconds 300
 ```
 
-Equivalent Bash invocation (no parsing pipeline or polling shell loop):
+Bash passes the same flags with quoted values: `--project "$project_id" --agent
+"$agent_id" --session "$session_id"`; no parsing pipeline or shell polling loop is needed.
 
-```bash
-python "$client" --home "$coordinator_home" tripwire --project "$project_id" --agent "$agent_id" --session "$session_id" --after "$through" --max-seconds 300
-```
+Zero exit returns `reason: changed|paused|timeout` plus final watch result; all three
+pause flags are checked. Pending batch, duplicate tripwire, transport failure or invalid
+response shape exit nonzero, never quiet. Default lifetime is 300 seconds in <=30-second
+polls; choose a host-compatible bound. Network failure can add HTTP timeout.
 
-The command exits zero with `reason: changed`, `paused`, or `timeout`, plus the final
-watch result. It checks all three pause flags. Errors, invalid response shapes, a pending
-batch, and a duplicate tripwire exit nonzero; never treat those as a quiet room. The
-default wait is bounded to 300 seconds, using polls of at most 30 seconds. Choose a bound
-compatible with the host's task lifetime. Network failure can add the HTTP timeout.
+Retain exactly one task handle and collect it before rearming. If another tool finishes
+first, check the existing watcher; do not launch a second one.
+An OS lock prevents overlapping tripwires in the same home,
+releasing on exit; leftover lock files are harmless. Direct watch is NOT locked: never
+run a second watch/inbox owner beside tripwire.
 
-Retain exactly one task handle per session. Collect it before rearming; if another tool
-finishes, check the existing watcher instead of launching a second one. An OS lock rejects
-overlapping tripwires in the same coordinator home and is released on process exit;
-leftover lock files are harmless. Direct `watch` calls are not locked: do not run a second
-watch/inbox owner alongside the tripwire.
+Before long work, drain inbox and arm for the work duration within host limits. Quiet
+polls cost no model turn. Check controls at work boundaries even if watcher is unfinished.
+On notification, preserve requests, handle urgent steering, then resume bounded work;
+do not force chatter/manual heartbeat parsing. Heartbeat proves contact, not reading/thought.
 
-Before a long work command, arm the tripwire after draining the inbox. It maintains
-heartbeats while the model is busy; quiet polls cost no model turn. Use a wait bound long
-enough for the work, within the host's supported lifetime, and check controls at work
-boundaries even if the watcher has not finished. On notification, preserve new requests
-in `pending`, answer urgent steering first, and return to the bounded work chunk. Do not
-require a slower model to produce chatter or manually parse heartbeat output. A heartbeat
-is transport contact, not a claim that it has already read or answered every message.
+- `changed`: consume/ack/drain inbox; rearm from last `through`.
+- Quiet `timeout`: next wait may use returned `seq`.
+- Lost output: check inbox; the helper persists no cursor. Only explicit ack advances it.
+- `paused`: stop rearming tripwire (it returns immediately); use bounded watch for controls.
+- `pending_batch`: resolve as in Foreground before rearming.
 
-After `changed`, consume and acknowledge the inbox before rearming from its last drained
-`through`. After a quiet timeout, the returned `seq` is suitable for the next wait. No
-cursor is persisted by the helper: if notification output is lost, check the inbox rather
-than guessing a new sequence. The durable consumption cursor advances only on explicit ack.
-
-On pause, stop rearming tripwire (it returns immediately while paused); use bounded watch
-calls for controls. On a pending batch, acknowledge only if its content was consumed.
-Otherwise use `context_reset` and `inbox --bootstrap` to recover from the durable cursor,
-then retrieve any pending content. This does not complete pending requests.
-
-Before compaction retain home/project/agent/session/client locators and the task handle.
-Afterward reconcile whether that task still exists; host survival behavior varies. On
-signoff, stop and collect the helper before setting disconnected presence. This package
-does not install a host wakeup or automatic rearm hook. Live Claude/Codex continuation
-must be verified in the actual host; CLI tests alone cannot establish it.
+Before compaction retain home/project/agent/session/client locators and task handle;
+afterward reconcile whether it survived. On signoff stop/collect it before declaring
+disconnected. A surviving helper without model continuation is not availability.

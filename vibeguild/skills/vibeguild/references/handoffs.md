@@ -1,61 +1,44 @@
 # Code handoffs and review
 
-Use this when transferring implementation to a reviewer or returning findings.
-Keep routine updates short; include only evidence relevant to the claim.
+In the shared/focused room, state change, next actor/action and scratch evidence UUID.
+For a blocker, identify missing input and supplier. Publish here even if reported in
+your terminal; keep owner/action visible until closed with a result/evidence link.
+Posting does not end monitoring.
 
-## Make the next action clear
+## Evidence
 
-In the focused room or `agent_chat`, state what changed, who should act next, and
-what they should check. Link detailed evidence in `agent_scratch` by message UUID.
-If blocked, name the missing input and who can supply it. Posting does not end the
-watch/work cycle.
-
-Include in the evidence message:
-
-- **Target:** task ID, repository/worktree, revision and relevant files. If changes
-  are uncommitted or untracked, say so; a commit ID alone does not identify them.
-  Record the branch/base and tree or file hashes when later commits must be matched
-  to this review; a matching tree can preserve source review across changed ancestry.
-- **Claim and check:** the behavior being claimed, exact command and working
-  directory, relevant runtime/dependencies, observed result, and evidence location.
-- **Limits:** what remains untested, failed, or conditional on the environment.
-
-Avoid repeating full logs or earlier evidence. Cite the earlier message and describe
-only what changed. If files changed after testing, identify what needs rechecking.
-Publish the handoff in the shared room even if you already reported it in your terminal.
-Close it with a result/evidence link; keep owner and next action visible until then.
+- **Target:** task ID, repository/worktree, revision, files, and any uncommitted/untracked
+  changes a commit ID misses. Record branch/base and tree/file hashes when matching later
+  commits to review; matching trees can preserve source review across changed ancestry.
+- **Claim/check:** behavior, exact command/CWD, relevant runtime/dependencies, observed
+  result and evidence location.
+- **Limits:** untested, failed or environment-conditional claims; identify checks invalidated
+  by later file changes. Cite prior evidence and describe deltas instead of repeating logs.
 
 ## Verify the claimed boundary
 
-For a regression, prefer a test that fails with the defect and passes with the fix.
-When that is uncertain, a focused mutation or pre-fix run can check the test's
-sensitivity. Do this only in your authorized isolated workspace; a read-only reviewer
-must not alter the implementer's files. Report when this check was not performed.
+Prefer regression evidence that fails with the defect and passes with the fix. When
+uncertain, a focused mutation/pre-fix run can check sensitivity, only in an authorized
+isolated workspace. A read-only reviewer must not change the implementer's files.
+Report when sensitivity was not checked; mutation testing is not required for every edit.
 
-A CLI or HTTP wiring claim needs a check through the real entry point. A test that
-rebuilds the wiring itself can stay green when production wiring is absent. Inspect
-relevant stderr as well as the exit code: `OK` alongside `ResourceWarning` or
-`Exception ignored in` is evidence to investigate, not an unqualified clean result.
-Use judgment about which checks the change needs; mutation testing is not mandatory
-for every edit.
+CLI/HTTP wiring claims need real-entry-point checks: rebuilding wiring inside a test
+can miss its absence in production. Inspect stderr as well as exit status; `OK` with
+`ResourceWarning` or `Exception ignored in` needs investigation, not a clean-result claim.
+Choose checks proportionate to the change.
 
-For a release-readiness recommendation, reproduce the declared CI in a clean declared
-environment when feasible. If only focused checks ran, qualify the recommendation.
-Keep source review, compiled code, browser interaction, local CI reproduction, hosted
-CI, merge, deployment and live service checks separate. Preserve the observer and method:
-a human visual check or a peer's report is useful evidence with that specific scope.
-When testing a monitor or adapter, exercise its own observation path with known data;
-another process noticing the same event does not validate the adapter. Distinguish a valid
-empty result from a missing source or an unexpected schema.
+For release readiness, reproduce declared CI in a clean declared environment when
+feasible; qualify recommendations based only on focused checks. Distinguish source,
+compiled-code, browser, local CI, hosted CI, merge, deployment and live-service evidence.
+Preserve observer/method: peer reports and human visual checks prove only their scope.
+Test monitors/adapters through THEIR observation path with known data; another process
+seeing the event does not validate them. Distinguish valid empty results from missing
+sources/unexpected schemas.
 
-## Return actionable findings
+## Findings and closure
 
-For each finding, give the affected file/behavior, a minimal reproduction or evidence
-reference, expected versus observed result, and the requested correction. Use stable
-labels such as F1/F2 within the review, and state which are accepted, still open, or
-superseded. These are prose labels, not coordinator message states.
-
-Do not treat an acknowledgment, peer agreement, or task status as independent
-verification. Say what you actually inspected or ran. Keep unresolved requests in
-`pending`; a reply does not automatically resolve them. When closing one, identify
-the evidence that resolved it and retain any other unfinished requests.
+Give file/behavior, minimal reproduction/evidence, expected/observed result, and requested
+correction. Stable prose labels (F1/F2) can track accepted/open/superseded findings; they
+are not coordinator states. Say what you inspected/ran: acknowledgment, agreement and task
+status are not independent verification. Retain unfinished requests in `pending`; a reply
+does not resolve them. Name closing evidence and preserve other unfinished requests.

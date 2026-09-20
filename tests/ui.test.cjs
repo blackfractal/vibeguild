@@ -503,7 +503,7 @@ test('template inspection escapes instructions and distinguishes saved, assigned
   const unavailable=run('templateHTML(templateInfo)');
   assert(unavailable.includes('Bound instructions unavailable'));assert(!unavailable.includes('UNVERIFIED BODY'));
   assert(unavailable.includes('&lt;bad path&gt;'));
-  assert(run("templateHTML({state:'none'})").includes('No template assigned'));
+  assert(run("templateHTML({state:'none'})").includes('No Template'));
 });
 
 test('only Template pane fetches a bound body, and an untemplated profile needs no request',async()=>{
@@ -517,7 +517,7 @@ test('only Template pane fetches a bound body, and an untemplated profile needs 
     assert(node('#agent-content').innerHTML.includes('Assigned instructions'));
     assert.equal(node('#composer-slot').innerHTML,'');
     await run('delete state.agents.a.template_ref;renderContent()');
-    assert.equal(urls.length,1);assert(node('#agent-content').innerHTML.includes('No template assigned'));
+    assert.equal(urls.length,1);assert(node('#agent-content').innerHTML.includes('No Template'));
   }finally{context.fetch=originalFetch;run('delete state.agents.a.template_ref');}
 });
 

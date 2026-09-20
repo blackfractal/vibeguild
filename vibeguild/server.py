@@ -132,7 +132,7 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/state":
                 return self.respond(200, p.snapshot())
             if url.path == "/api/history":
-                return self.respond(200, {"messages": p.history(query.get("room"), int(query.get("before", 0)) or None, query.get("q", ""), query.get("agent_id"))})
+                return self.respond(200, {"messages": p.history(query.get("room"), int(query.get("before", 0)) or None, query.get("q", ""), query.get("agent_id"), query.get("human_id"))})
             if url.path == "/api/message":
                 with p.lock:
                     message = next((m for m in p.messages if m["id"] == query.get("id")), None)

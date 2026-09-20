@@ -178,6 +178,40 @@ class HTTPTests(unittest.TestCase):
         _, _, body = self.request("/api/message?project="+self.p.id+"&id="+m["event_id"]+"&start=12000")
         self.assertEqual(8007, len(json.loads(body)["body"]))
 
+    def test_human_rename_owner_and_agent_transport(self):
+        owner_id = self.p.human_id()
+        agent = self.cmd("register", {"handle": "test"})
+        self.cmd("human_update", {"human_id": owner_id, "name": "Human"})
+        result = self.cmd("human_update", {"human_id": owner_id, "name": "Jonathan"})
+        self.assertEqual(owner_id, result["human_id"])
+        self.assertEqual("jonathan", result["handle"])
+        self.cmd("control", {"paused": False})
+        status, _, body = self.request("/api/command", {"project": self.p.id, "action": "human_update", "args": {"human_id": owner_id, "name": "Imposter"}}, {"Authorization": "Bearer " + agent["credential"]})
+        self.assertEqual(403, status, body)
+        status, _, body = self.request("/api/state?project=" + self.p.id)
+        self.assertEqual("Jonathan", json.loads(body)["config"]["humans"][0]["name"])
+
+    def test_human_notes_owner_history_and_explicit_agent_reads(self):
+        agent = self.cmd("register", {"handle": "test"})
+        self.cmd("control", {"paused": False})
+        note = self.cmd("note", {"body": "Personal needle @test " + "X"*17000})
+        route = "/api/history?project=" + self.p.id + "&human_id=" + self.p.human_id()
+        status, _, body = self.request(route)
+        self.assertEqual(200, status)
+        rows = json.loads(body)["messages"]
+        self.assertEqual([note["event_id"]], [m["id"] for m in rows])
+        self.assertTrue(rows[0]["has_more_body"])
+        self.assertNotIn("room", rows[0])
+        status, _, _ = self.request(route, headers={"Authorization": "Bearer " + agent["credential"]})
+        self.assertEqual(401, status)
+        _, _, body = self.request("/api/history?project="+self.p.id+"&q=needle")
+        self.assertEqual([], json.loads(body)["messages"])
+        _, _, body = self.request("/api/message?project="+self.p.id+"&id="+note["event_id"]+"&start=16000")
+        self.assertGreater(len(json.loads(body)["body"]), 1000)
+        self.cmd("note", {"body": "Agent cannot spoof a human note", "human_id": self.p.human_id()}, agent["credential"])
+        _, _, body = self.request(route)
+        self.assertEqual(1, len(json.loads(body)["messages"]))
+
     def test_installed_skill_cli_join_resume_and_fencing(self):
         run = subprocess.run([sys.executable, "-m", "vibeguild", "install-skill", "--dest", str(self.root / "skills")], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(0, run.returncode, run.stderr)

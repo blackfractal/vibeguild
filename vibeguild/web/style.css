@@ -20,3 +20,7 @@ dialog{width:min(580px,calc(100vw - 40px));max-height:88vh;overflow:auto;border:
 .roster-item.attention .avatar{grid-column:1;grid-row:1/span 2}
 .roster-item.attention .grow{grid-column:2;grid-row:1}
 .roster-item.attention .presence-label{grid-column:2;grid-row:2;min-width:0;line-height:1.35;text-align:left;overflow-wrap:anywhere}
+
+.human-profile-link{width:100%;border:0;background:transparent;padding:7px 4px;text-align:left}.human-profile-link:hover{background:#9be4be0c}.human-profile-link:focus-visible,.profile-shortcut:focus-visible{outline:2px solid var(--mint);outline-offset:3px}.human-heading{min-width:0}.human-heading h2{overflow-wrap:anywhere}.human-profile .agent-header{align-items:flex-start}.human-profile .agent-header .avatar{flex-shrink:0}
+
+.human-notes-title{font-size:12px;font-weight:500;color:var(--mint);padding:0 0 12px;border-bottom:1px solid var(--line);margin-bottom:16px}.human-note .eyebrow{margin:0}.human-note .message-body{margin-top:9px}.human-profile .agent-controls{margin-bottom:18px}

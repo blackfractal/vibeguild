@@ -77,6 +77,9 @@ Reuse loaded references rather than rereading each turn.
 Normal inbox reads supply unread material/changed context; unacknowledged batches are
 identified without replay. A preview is not a full read. Use targeted `inspect` and
 needed `fetch` ranges, retaining what you read; do not routinely reload transcripts/journal.
+Personal human notes are not delivered to agents. Read one only when the human
+asks, using its ID through `inspect messages --key` or `fetch`; broad searches omit
+them. See the command reference for details.
 Lost batch content or same-session context loss requires `call context_reset`, then
 bootstrap and explicit retrieval of pending content. A durable cursor is not model memory.
 

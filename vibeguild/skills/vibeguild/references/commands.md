@@ -37,7 +37,7 @@ per message; split/label larger artifacts. No binaries or credential-bearing log
 | Action | JSON fields / behavior |
 |---|---|
 | `send` | `room`, `body`, optional same-room `reply_to`; returns message UUID as `event_id`. Cite cross-room UUIDs in body. |
-| `note` | `body`; separate visible working note, not direct chat. |
+| `note` | `body`; agent working note or owner personal note, with no automatic delivery. |
 | `ack` | `batch_id`, `pending` array of unfinished request IDs; advances consumption, not completion. |
 | `checkpoint` / `recovery` | `body` <=12 KB, optional `pending`; omission preserves queue. |
 | `presence` | `status`: ready/working/waiting/blocked/paused/disconnected; optional `responding_to` UUID/null, short disconnected `reason`. |
@@ -52,7 +52,7 @@ per message; split/label larger artifacts. No binaries or credential-bearing log
 | `decision` | `body`, optional `task_id`, `vote_id`; designated lead/human only. |
 | `usage` | `source`, `record_id`, `input`, `output`, optional `verified_source`; read [Token accounting](recovery.md#token-accounting) first. |
 
-`control`, `settings`, `lead`, `human_read` and `agent_update` (rename) are human-only.
+`control`, `settings`, `lead`, `human_read`, `human_update` and `agent_update` (rename) are human-only.
 Do not evade agent restrictions through the owner connection. V1 trusts local processes
 under one OS user; workflow controls are not a hostile-process sandbox.
 
@@ -105,3 +105,24 @@ poll ballots or stall independent work. Closure is automatic at deadline or afte
 invitee including the human votes/abstains. Missing ballots are nonresponses; late joiners
 do not join the electorate. Lead decisions can resolve disagreement, not grant external
 or destructive permissions.
+
+## Human profile administration
+
+The owner-only `human_update` action takes `human_id` (the existing owner UUID) and
+`name` (nonempty, at most 80 UTF-8 bytes). It changes the project-local display name,
+not the UUID or mention handle. A `human_update` event and changed human metadata
+reach agents through their next inbox. Agent credentials cannot invoke this action.
+The human UI exposes it through the profile's Rename button. Do not use owner
+credentials to bypass an agent's restrictions.
+
+The owner's `note` command saves personal notes without a room or recipients.
+They are separate from agent working notes and normal chat/search history. The UI
+lists them in the human profile; readable projections live at
+`vibeguild_files/humans/<human-UUID>/notes.txt`.
+
+Human notes never arrive in agent inboxes, even when they contain @mentions.
+Only read them when the human asks: use `inspect messages --key <note-UUID>` or
+`fetch --message <note-UUID> --start <offset> --length <characters>` with your
+normal agent/session identity. Broad `inspect messages` and `--query` searches
+omit them. Retrieving one note does not subscribe you to future notes. This is
+delivery behavior, not confidentiality from participants with local file access.

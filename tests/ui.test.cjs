@@ -308,3 +308,143 @@ test('saved panel geometry is restored and clamped on load',()=>{
   delete stored.panels;
   assert.equal(run(`JSON.stringify(readPanels())`),'{"left":{"open":true,"width":238},"right":{"open":true,"width":260}}');
 });
+
+test('human profile navigation is UUID-based and never falls through to agent chat',async()=>{
+  const oldFetch=context.fetch;
+  context.fetch=async url=>{assert(url.includes('&human_id=human'),'Human profile must not fetch agent chat');return {ok:true,json:async()=>({messages:[]})};};
+  try{
+    await listeners.click[0]({target:{closest:()=>({dataset:{act:'nav',view:'human:human'}})}});
+    assert.equal(run('view'),'human:human');
+    assert(run('tabs.includes("human:human")'));
+    assert.equal(run('roomForView()'),null);
+    assert.equal(run('unreadView("human:human")'),0);
+    assert.equal(run('tabName("human:human")'),'Jonathan');
+    const html=node('#stream').innerHTML;
+    assert(html.includes('data-act="rename-human"'));
+    assert(html.includes('Copy UUID'));
+    assert(!html.includes('toggle-agent'));
+    assert(!html.includes('agent-connect'));
+    assert(node('#composer-slot').innerHTML.includes('Save note'));
+    assert(!node('#composer-slot').innerHTML.includes('new-vote'));
+    assert(node('#app').innerHTML.includes('class="human-profile-link row"'));
+    assert(node('#app').innerHTML.includes('profile-shortcut'));
+  }finally{context.fetch=oldFetch;}
+});
+
+test('human rename modal submits owner UUID, shows errors, and cancel sends nothing',async()=>{
+  const oldFormData=context.FormData;
+  context.FormData=class{constructor(form){this.form=form;}get(key){return this.form.values[key];}};
+  node('#modal').showModal=()=>{node('#modal').open=true;};
+  node('#modal').close=()=>{node('#modal').open=false;};
+  run(`globalThis.savedHumanCommand=command;globalThis.humanCalls=[];state.config.humans[0].handle='human';command=async(action,args)=>{humanCalls.push({action,args});if(!args.name.trim())throw Error('human name must be nonempty');return {name:args.name};}`);
+  const open=()=>listeners.click[0]({target:{closest:()=>({dataset:{act:'rename-human',id:'human'}})}});
+  try{
+    await open();
+    assert(node('#modal-content').innerHTML.includes('@human'));
+    node('#modal-form').values={name:' '};
+    const submitter={disabled:false};
+    await node('#modal-form').onsubmit({preventDefault(){},target:node('#modal-form'),submitter});
+    assert(node('#modal-error').textContent.includes('nonempty'));
+    assert.equal(node('#modal').open,true);
+    assert.equal(submitter.disabled,false);
+    node('#modal-form').values={name:'Jonathan'};
+    await node('#modal-form').onsubmit({preventDefault(){},target:node('#modal-form'),submitter});
+    assert.equal(node('#modal').open,false);
+    assert.equal(run('humanCalls[1].action'),'human_update');
+    assert.equal(run('humanCalls[1].args.human_id'),'human');
+    await open();
+    await listeners.click[0]({target:{closest:()=>({dataset:{act:'close-modal'}})}});
+    assert.equal(run('humanCalls.length'),2);
+  }finally{run('command=savedHumanCommand');context.FormData=oldFormData;}
+});
+
+test('human rename renders escaped current identity and old-to-new activity',async()=>{
+  run(`state.config.humans[0].name='Jo <new>';state.activity=[{kind:'human_update',actor:'human',at:1,data:{old_name:'Human',name:'Jo <new>'}}];view='activity'`);
+  await run('renderContent()');
+  assert(node('#stream').innerHTML.includes('renamed the human'));
+  assert(node('#stream').innerHTML.includes('Human → Jo &lt;new&gt;'));
+  assert.equal(run('tabName("human:human")'),'Jo <new>');
+  assert(run(`message({id:'m',actor:'human',sender_name:'Human',body:'Earlier',room:'agent_chat',at:1})`).includes('Jo &lt;new&gt;'));
+  run(`state.config.humans[0].name='Jonathan';state.activity=[]`);
+});
+
+test('personal note form saves only a note and keeps retry ID and draft on failure',async()=>{
+  const originalFetch=context.fetch;
+  const calls=[];let fail=true,serial=0;
+  context.crypto={randomUUID:()=>`note-request-${++serial}`};
+  context.fetch=async(url,opts)=>{
+    if(url==='/api/command'){
+      const payload=JSON.parse(opts.body);calls.push(payload);
+      if(fail)return {ok:false,status:500,json:async()=>({error:'Could not save'})};
+      return {ok:true,json:async()=>({event_id:'saved-note'})};
+    }
+    if(url.startsWith('/api/state'))return {ok:true,json:async()=>run('({...state})')};
+    assert(url.includes('&human_id=human'));
+    return {ok:true,json:async()=>({messages:[]})};
+  };
+  try{
+    run(`project='notes-test';view='human:human';humanNotesComposer('human')`);
+    const input=node('#message-input');input.value='My @atlas note\nsecond line';
+    input.oninput({target:input});
+    await node('#human-note-form').onsubmit({preventDefault(){}});
+    assert.equal(input.value,'My @atlas note\nsecond line');
+    assert.equal(run(`drafts[humanDraftKey('human')]`),input.value);
+    assert.equal(node('#save-human-note').disabled,false);
+    assert(node('#toast').textContent.includes('Could not save'));
+    fail=false;
+    await node('#human-note-form').onsubmit({preventDefault(){}});
+    assert.equal(calls.length,2);
+    assert.equal(calls[0].request_id,calls[1].request_id);
+    assert.equal(calls[0].action,'note');
+    assert.deepEqual(Object.keys(calls[0].args),['body']);
+    assert.equal(run(`drafts[humanDraftKey('human')]`),'');
+    assert.equal(input.value,'');
+  }finally{context.fetch=originalFetch;}
+});
+
+test('polling retains personal drafts and edits made while a note save is pending',async()=>{
+  const originalFetch=context.fetch;let complete;
+  context.fetch=async(url,opts)=>{
+    if(url==='/api/command')return new Promise(resolve=>{complete=()=>resolve({ok:true,json:async()=>({event_id:'saved'})});});
+    if(url.startsWith('/api/state'))return {ok:true,json:async()=>run('({...state})')};
+    assert(url.includes('&human_id=human'));return {ok:true,json:async()=>({messages:[]})};
+  };
+  try{
+    run(`project='notes-race';view='human:human';humanNotesComposer('human')`);
+    const input=node('#message-input');input.value='First note';input.oninput({target:input});
+    const saving=node('#human-note-form').onsubmit({preventDefault(){}});
+    input.value='A new draft';input.oninput({target:input});
+    await run('render();renderContent()');
+    assert(node('#composer-slot').innerHTML.includes('A new draft'));
+    assert(node('#composer-slot').innerHTML.includes('disabled'));
+    complete();await saving;
+    assert.equal(run(`drafts[humanDraftKey('human')]`),'A new draft');
+    assert.equal(input.value,'A new draft');
+  }finally{context.fetch=originalFetch;}
+});
+
+test('personal notes paginate independently and expose copy/full-note actions only',async()=>{
+  const originalFetch=context.fetch;
+  const notes=Array.from({length:50},(_,i)=>({id:`note-${i+2}`,seq:i+2,at:1,body:`Note ${i+2}`,has_more_body:i===0}));
+  context.fetch=async url=>{assert(url.includes('&human_id=human'));return {ok:true,json:async()=>({messages:url.includes('before=2')?[{id:'note-1',seq:1,at:1,body:'First'}]:notes})};};
+  try{
+    run(`project='notes-paging';view='human:human'`);await run('renderContent()');
+    let html=node('#human-notes-list').innerHTML;
+    assert(html.includes('Load earlier notes'));assert(html.includes('Read full note'));assert(html.includes('Copy note ID'));
+    assert(!html.includes('data-act="reply"'));assert(!html.includes('read-receipts'));
+    const el={dataset:{act:'older-human-notes',human:'human',before:'2'},disabled:false};
+    await listeners.click[0]({target:{closest:()=>el}});
+    html=node('#human-notes-list').innerHTML;assert(html.includes('First'));assert(!html.includes('Load earlier notes'));
+    await run('renderContent()');
+    assert(node('#human-notes-list').innerHTML.includes('First'),'poll keeps loaded earlier notes');
+    assert(!node('#composer-slot').innerHTML.includes('data-act="mention"'));
+  }finally{context.fetch=originalFetch;}
+});
+
+test('a full unseen notes page resets pagination instead of skipping a gap',()=>{
+  run(`mergeHumanNotes('gap-test',[{id:'old',seq:1,at:1,body:'Old'}])`);
+  context.newNotes=Array.from({length:50},(_,i)=>({id:`new-${i}`,seq:100+i,at:1,body:'New'}));
+  run(`mergeHumanNotes('gap-test',newNotes)`);
+  assert.equal(run(`humanNotesCache['gap-test'].rows.length`),50);
+  assert.equal(run(`humanNotesCache['gap-test'].more`),true);
+});

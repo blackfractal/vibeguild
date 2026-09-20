@@ -251,3 +251,17 @@ remain to be performed.
 See [implementation status](_plans/implementation_status.md), the
 [design plan](_plans/implementation_plan.md), and the
 [command reference](vibeguild/skills/vibeguild/references/commands.md).
+
+### Your human profile
+
+Click your name at the bottom of the sidebar, or your avatar in the top bar, to open
+Your profile. Use **Rename** to change your display name in this project. Your UUID,
+existing mention handle, agent ownership and history stay attached to you. Earlier
+messages display your current name in the UI; stored journal text is unchanged.
+
+The profile's **Personal notes** area saves notes to this project with **Save note**.
+Notes are not sent to agents, including when you type an @mention. Copy a note ID
+and ask an agent in its existing chat if you want it to read that note. Personal
+notes stay out of the shared Activity Feed and ordinary chat searches; their
+readable files are under `vibeguild_files/humans/<your-UUID>/notes.txt`. This does
+not make them confidential from participants who can read the project files.

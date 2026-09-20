@@ -118,10 +118,87 @@ class StoreTests(unittest.TestCase):
         self.p.command("settings", {"general_context": "New requirement: offline only"}, human=True)
         out, _ = self.drain()
         self.assertEqual("New requirement: offline only", out["general_context"])
+
         self.assertNotIn("general_context", self.p.inbox(self.a["credential"]))
         self.call("context_reset", {})
         out = self.p.inbox(self.a["credential"], bootstrap=True)
         self.assertEqual("New requirement: offline only", out["general_context"])
+
+    def test_human_rename_preserves_identity_and_history_on_reopen(self):
+        self.p.command("human_update", {"human_id": self.p.human_id(), "name": "Human"}, human=True)
+        owner = copy.deepcopy(self.p.state["config"]["humans"][0])
+        msg = self.p.command("send", {"body": "Original human message"}, human=True)
+        vote = self.call("vote", {"question": "Keep identity?", "options": ["A", "B"], "minutes": 5})
+        self.p.command("human_read", {"room": "agent_chat"}, human=True)
+        before = copy.deepcopy({k: self.p.state[k] for k in ("agents", "sessions", "rooms", "reads", "votes")})
+        self.p.command("control", {"paused": True}, human=True)
+        result = self.p.command("human_update", {"human_id": owner["id"], "name": " Jonathan "}, human=True, request_id="rename-human")
+        self.assertEqual("Jonathan", result["name"])
+        self.assertEqual("Jonathan", json.loads((self.p.path / "vibeguild.json").read_text("utf-8"))["humans"][0]["name"])
+        self.assertEqual(owner["handle"], result["handle"])
+        for key, value in before.items():
+            self.assertEqual(value, self.p.state[key], key)
+        again = self.p.command("human_update", {"human_id": owner["id"], "name": "Jonathan"}, human=True, request_id="rename-human")
+        self.assertEqual(result, again)
+        original = next(m for m in self.p.messages if m["id"] == msg["event_id"])
+        self.assertEqual(owner["name"], original["sender_name"])
+        self.assertIn(owner["id"], self.p.state["votes"][vote["vote_id"]]["electorate"])
+        self.p.close()
+        self.p = Project(self.root / "project", clock=lambda: self.now)
+        self.assertEqual({**owner, "name": "Jonathan"}, self.p.state["config"]["humans"][0])
+
+    def test_human_rename_rejects_invalid_input_and_agents_without_mutation(self):
+        owner_id = self.p.human_id()
+        for args in ({"human_id": "unknown", "name": "Jonathan"}, *({"human_id": owner_id, "name": name} for name in (None, [], " ", "x"*81, "é"*41))):
+            with self.subTest(args=args):
+                before = copy.deepcopy(self.p.state)
+                seq = len(self.p.events)
+                with self.assertRaises(Problem):
+                    self.p.command("human_update", args, human=True)
+                self.assertEqual(before, self.p.state)
+                self.assertEqual(seq, len(self.p.events))
+        with self.assertRaises(Problem):
+            self.call("human_update", {"human_id": owner_id, "name": "Jonathan"})
+        seq = len(self.p.events)
+        no_op = self.p.command("human_update", {"human_id": owner_id, "name": " Jonathan "}, human=True)
+        self.assertTrue(no_op["unchanged"])
+        self.assertEqual("jonathan", no_op["handle"])
+        self.assertEqual(seq, len(self.p.events))
+        self.p.command("human_update", {"human_id": owner_id, "name": "é"*40}, human=True)
+
+    def test_human_rename_preserves_legacy_handle_and_updates_inbox(self):
+        # Build an old-format project through its original creation config, not a
+        # live projection edit (live external human edits are intentionally ignored).
+        legacy = self.root / "legacy"
+        legacy.mkdir()
+        (legacy / "vibeguild_files" / "journal").mkdir(parents=True)
+        config = copy.deepcopy(self.p.state["config"])
+        config["humans"][0]["name"] = "Human"
+        config["agents"] = []
+        config["humans"][0].pop("handle")
+        atomic(legacy / "vibeguild.json", config)
+        with_project = Project(legacy)
+        try:
+            renamed = with_project.command("human_update", {"human_id": with_project.human_id(), "name": "Jonathan"}, human=True)
+            self.assertEqual("human", renamed["handle"])
+            with_project.command("send", {"body": "@human and @Jonathan"}, human=True)
+            self.assertEqual([with_project.human_id()], with_project.messages[-1]["human_mentions"])
+            with_project.command("send", {"body": "@Jonathan"}, human=True)
+            self.assertEqual([], with_project.messages[-1]["human_mentions"])
+        finally:
+            with_project.close()
+
+        self.p.command("human_update", {"human_id": self.p.human_id(), "name": "Human"}, human=True)
+        self.drain(bootstrap=True)
+        seq = len(self.p.events)
+        renamed = self.p.command("human_update", {"human_id": self.p.human_id(), "name": "Jonathan"}, human=True)
+        self.assertTrue(self.p.has_updates(seq, self.a["agent_id"]))
+        out, events = self.drain()
+        self.assertEqual("Jonathan", out["humans"][0]["name"])
+        self.assertEqual("jonathan", out["humans"][0]["handle"])
+        self.assertTrue(any(e["id"] == renamed["event_id"] and e["kind"] == "human_update" for e in events))
+        boot, _ = self.drain(self.b, bootstrap=True)
+        self.assertEqual("Jonathan", boot["humans"][0]["name"])
 
     def test_pause_human_can_interject_and_ack(self):
         self.p.command("control", {"paused": True}, human=True)
@@ -136,6 +213,74 @@ class StoreTests(unittest.TestCase):
         self.p.command("control", {"paused": False}, human=True)
         _, events = self.drain()
         self.assertTrue(any(e["data"].get("body") == "Please change direction" for e in events))
+
+    def test_human_notes_do_not_deliver_wake_or_leak_into_shared_views(self):
+        self.drain(bootstrap=True)
+        self.drain(self.b, bootstrap=True)
+        before = copy.deepcopy(self.p.state["agents"])
+        seq = len(self.p.events)
+        self.now += 5
+        note = self.p.command("note", {"body": "Personal needle @builder @reviewer @Jonathan", "room": "not-a-room", "human_id": "spoof"}, human=True)
+        message = self.p.messages[-1]
+        self.assertEqual(self.p.human_id(), message["human_id"])
+        self.assertNotIn("room", message)
+        self.assertNotIn("agent_id", message)
+        for key in ("recipients", "mentions", "human_mentions"):
+            self.assertEqual([], message[key])
+        self.assertEqual(before, self.p.state["agents"])
+        self.assertFalse(self.p.has_updates(seq, self.a["agent_id"]))
+        self.assertTrue(self.p.has_updates(seq))  # The human page does refresh.
+        snapshot = self.p.snapshot()
+        self.assertFalse(any(e["id"] == note["event_id"] for e in snapshot["activity"]))
+        self.assertEqual(0, snapshot["unread"]["agent_chat"]["count"])
+        self.assertEqual([], self.p.history(room="agent_chat"))
+        self.assertEqual([], self.p.history(query="Personal needle"))
+        self.assertEqual([], self.drain()[1])
+        late = self.p.command("register", {"handle": "late"}, human=True)
+        self.assertFalse(any(e["id"] == note["event_id"] for e in self.drain(late, bootstrap=True)[1]))
+        self.assertEqual(0, self.p.inspect(self.a["credential"], "messages")["total"])
+        self.assertEqual(0, self.p.inspect(self.a["credential"], "messages", query="Personal needle")["total"])
+        self.assertEqual(1, self.p.inspect(self.a["credential"], "messages", key=note["event_id"])["total"])
+        self.assertEqual(0, self.p.inspect(self.a["credential"], "messages", key=note["event_id"], query="needle")["total"])
+        fetched = self.p.fetch(self.a["credential"], note["event_id"], start=9, length=6)
+        self.assertEqual("needle", fetched["body"])
+        self.p.command("human_read", {"room": "agent_chat"}, human=True)
+        with self.assertRaises(Problem):
+            self.call("send", {"body": "No cross-channel reply", "reply_to": note["event_id"]})
+        self.p.command("control", {"paused": True}, human=True)
+        with self.assertRaises(Problem):
+            self.p.fetch(self.a["credential"], note["event_id"])
+        self.p.command("note", {"body": "Owner can still save while paused"}, human=True)
+
+    def test_human_note_persistence_retry_pagination_and_agent_notes(self):
+        owner = self.p.human_id()
+        agent_note = self.call("note", {"body": "Agent working note", "human_id": owner})
+        self.assertNotIn("human_id", self.p.messages[-1])
+        self.assertEqual(self.a["agent_id"], self.p.messages[-1]["agent_id"])
+        first = self.p.command("note", {"body": "First personal note"}, human=True, request_id="note-retry")
+        retry = self.p.command("note", {"body": "First personal note"}, human=True, request_id="note-retry")
+        self.assertEqual(first, retry)
+        for i in range(50):
+            self.p.command("note", {"body": f"Personal note {i}"}, human=True)
+        latest = self.p.history(human_id=owner)
+        self.assertEqual(50, len(latest))
+        earlier = self.p.history(human_id=owner, before=latest[0]["seq"])
+        self.assertEqual([first["event_id"]], [m["id"] for m in earlier])
+        self.assertEqual([], earlier[0]["receipts"])
+        self.assertEqual([agent_note["event_id"]], [m["id"] for m in self.p.history(agent_id=self.a["agent_id"])])
+        with self.assertRaises(Problem):
+            self.p.history(human_id=owner, room="agent_chat")
+        with self.assertRaises(Problem):
+            self.p.history(human_id="wrong-owner")
+        transcript = self.p.files / "humans" / owner / "notes.txt"
+        original = transcript.read_text("utf-8")
+        self.p.command("human_update", {"human_id": owner, "name": "New display name"}, human=True)
+        self.p.close()
+        self.p = Project(self.root / "project", clock=lambda: self.now)
+        self.assertTrue(transcript.read_text("utf-8").endswith(original))
+        self.assertEqual(50, len(self.p.history(human_id=owner)))
+        self.assertEqual(first["event_id"], self.p.history(human_id=owner, before=latest[0]["seq"])[0]["id"])
+        self.assertTrue((self.p.files / "agents" / self.a["agent_id"] / "notes.txt").exists())
 
     def test_vote_waits_for_human_and_abstention(self):
         v = self.call("vote", {"question": "Parser format?", "options": ["JSON", "YAML"], "minutes": 10})["vote_id"]

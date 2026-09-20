@@ -206,7 +206,7 @@ class Project:
                 # a baseline rather than presenting all history as newly unread.
                 s = copy.deepcopy(self.state)
                 s["reads"][human_id] = {"participant_id": human_id, "rooms": {
-                    rid: max((m["seq"] for m in self.messages if m["room"] == rid), default=0)
+                    rid: max((m["seq"] for m in self.messages if m.get("room") == rid), default=0)
                     for rid in s["rooms"]}}
                 self._commit("human_read_baseline", human_id, {"room_count": len(s["rooms"])}, s)
             self._project_config()
@@ -320,6 +320,8 @@ class Project:
 
     def _transcript_path(self, data, kind):
         if kind == "note":
+            if "human_id" in data:
+                return self.files / "humans" / data["human_id"] / "notes.txt"
             return self.files / "agents" / data["agent_id"] / "notes.txt"
         room = data["room"]
         if room in ("agent_chat", "agent_scratch"):
@@ -402,7 +404,7 @@ class Project:
             if agent and action not in permitted_paused:
                 if s["control"]["paused"] or agent.get("paused") or agent.get("budget_paused"):
                     raise Problem("Paused: checkpoint/acknowledge and watch for resume", 409)
-            if action in {"settings", "lead", "control", "agent_update", "human_read"} and not human:
+            if action in {"settings", "lead", "control", "agent_update", "human_update", "human_read"} and not human:
                 raise Problem("This operation requires the human owner", 403)
             result, data, kind = {}, {}, action
             if action == "register":
@@ -427,6 +429,21 @@ class Project:
                     a["status"] = "disconnected"
                 data = {"agent_id": aid, "name": handle}
                 self._sync_roster(s)
+            elif action == "human_update":
+                owner = s["config"]["humans"][0]
+                if args.get("human_id") != owner["id"]:
+                    raise Problem("Unknown human owner", 404)
+                name = text(args.get("name"), "human name", 80)
+                old_name = owner["name"]
+                if name == old_name:
+                    return {"ok": True, "human_id": owner["id"], "name": name,
+                            "handle": owner.get("handle", handle_from_name(old_name)), "unchanged": True}
+                # Old projects may derive the mention handle from the display name.
+                # Freeze that existing address before changing the label.
+                owner.setdefault("handle", handle_from_name(old_name))
+                owner["name"] = name
+                data = {"human_id": owner["id"], "old_name": old_name, "name": name}
+                result = {"human_id": owner["id"], "name": name, "handle": owner["handle"]}
             elif action == "agent_update":
                 a = s["agents"].get(args.get("agent_id"))
                 if not a:
@@ -464,6 +481,13 @@ class Project:
                 s["rooms"][rid] = {"id": rid, "name": text(args.get("name"), "chat name", 80), "kind": "group", "members": members, "created_at": now}
                 result = {"room_id": rid}
                 data = s["rooms"][rid]
+            elif action == "note" and human:
+                # Personal notes never belong to a chat or resolve mentions.
+                # The authenticated owner, not command input, supplies authorship.
+                data = {"body": text(args.get("body"), "note", 250000), "human_id": actor,
+                        "recipients": [], "mentions": [], "human_mentions": [],
+                        "sender_name": s["config"]["humans"][0]["name"], "human": True}
+                kind = "note"
             elif action in ("send", "note"):
                 body = text(args.get("body"), "message", 250000)
                 rid = args.get("room", "agent_chat")
@@ -473,7 +497,7 @@ class Project:
                     raise Problem(f"agent_chat is limited to 2000 characters for agent summaries; received {len(body)}. Publish technical detail in agent_scratch, then send a concise agent_chat summary citing the scratch message UUID.")
                 if agent and s["rooms"][rid]["kind"] not in ("global", "scratch") and actor not in s["rooms"][rid]["members"]:
                     raise Problem("Join the room before posting", 403)
-                if args.get("reply_to") is not None and not any(m["id"] == args["reply_to"] and m["room"] == rid and m["kind"] == "message" for m in self.messages):
+                if args.get("reply_to") is not None and not any(m["id"] == args["reply_to"] and m.get("room") == rid and m["kind"] == "message" for m in self.messages):
                     raise Problem("Reply must reference an existing message in this chat")
                 mentions = [a["id"] for a in s["agents"].values() if re.search(r"(?<!\w)@" + re.escape(a["handle"]) + r"(?![\w-])", body)]
                 human_mentions = [h["id"] for h in s["config"]["humans"] if re.search(
@@ -502,7 +526,7 @@ class Project:
                 rid = args.get("room")
                 if rid not in s["rooms"]:
                     raise Problem("Unknown chat", 404)
-                latest = max((m["seq"] for m in self.messages if m["room"] == rid), default=0)
+                latest = max((m["seq"] for m in self.messages if m.get("room") == rid), default=0)
                 record = s["reads"].setdefault(actor, {"participant_id": actor, "rooms": {}})
                 previous = record["rooms"].get(rid, 0)
                 if latest <= previous:
@@ -765,8 +789,9 @@ class Project:
             read_rooms = s["reads"].get(self.human_id(), {}).get("rooms", {})
             s["unread"] = {rid: {"count": len(rows), "latest_seq": max((m["seq"] for m in rows), default=read_rooms.get(rid, 0))}
                            for rid in s["rooms"]
-                           for rows in [[m for m in self.messages if m["room"] == rid and m["actor"] != self.human_id() and m["seq"] > read_rooms.get(rid, 0)]]}
-            s["activity"] = [self.public_event(e) for e in self.events if e["kind"] not in ("ack", "inbox", "history_read", "human_read", "human_read_baseline", "presence", "checkpoint", "context_reset", "usage")][-150:]
+                             for rows in [[m for m in self.messages if m.get("room") == rid and m["actor"] != self.human_id() and m["seq"] > read_rooms.get(rid, 0)]]}
+            s["activity"] = [self.public_event(e) for e in self.events if e["kind"] not in ("ack", "inbox", "history_read", "human_read", "human_read_baseline", "presence", "checkpoint", "context_reset", "usage")
+                             and not (e["kind"] == "note" and "human_id" in e["data"])][-150:]
             return s
 
     def has_updates(self, after, actor=None):
@@ -797,9 +822,13 @@ class Project:
             d["body"] = d["body"][:1200]
         return {"id": e["id"], "seq": e["seq"], "at": e["at"], "kind": e["kind"], "actor": e["actor"], "data": d}
 
-    def history(self, room=None, before=None, query="", agent_id=None):
+    def history(self, room=None, before=None, query="", agent_id=None, human_id=None):
         with self.lock:
-            rows = [m for m in self.messages if (not room or m["room"] == room) and (m.get("agent_id") == agent_id if agent_id else m["kind"] == "message")
+            if human_id and (human_id != self.human_id() or agent_id or room):
+                raise Problem("Choose the human owner's notes without a room or agent filter")
+            rows = [m for m in self.messages if (not room or m.get("room") == room)
+                    and (m.get("human_id") == human_id and m["kind"] == "note" if human_id else
+                         m.get("agent_id") == agent_id if agent_id else m["kind"] == "message")
                     and (not before or m["seq"] < before) and (not query or query.casefold() in m["body"].casefold())]
             result = []
             for m in rows[-50:]:
@@ -813,7 +842,7 @@ class Project:
     def _message_recipients(self, message):
         if "recipients" in message:
             return message["recipients"]
-        room = self.state["rooms"].get(message["room"], {})
+        room = self.state["rooms"].get(message.get("room"), {})
         return [a["id"] for a in self.state["agents"].values() if a["id"] != message["actor"] and a.get("created_at", 0) <= message["at"] and
                 (room.get("kind") in ("global", "scratch") or a["id"] in message.get("mentions", []) or
                  (room.get("kind") in ("direct", "group") and a["id"] in room.get("members", [])))]
@@ -863,7 +892,7 @@ class Project:
                 raise Problem("Bootstrap/context exceeds this inbox cap. Retry with --max-bytes 64000; shorten completed-task checkpoints/context if still too large.", 413)
             through = a.get("cursor", 0)
             for e in self.events[through:]:
-                relevant = (e["kind"] == "message" and e["actor"] != actor and (e["data"].get("room") in room_ids or actor in e["data"].get("mentions", []))) or e["kind"] in ("vote", "ballot", "votes_closed", "decision", "task", "task_update", "lead", "room", "register", "agent_update")
+                relevant = (e["kind"] == "message" and e["actor"] != actor and (e["data"].get("room") in room_ids or actor in e["data"].get("mentions", []))) or e["kind"] in ("vote", "ballot", "votes_closed", "decision", "task", "task_update", "lead", "room", "register", "agent_update", "human_update")
                 if relevant:
                     item = self.public_event(e)
                     item.get("data", {}).pop("human_mentions", None)
@@ -939,7 +968,9 @@ class Project:
             start = int(number(start, "start", 0))
             limit = int(number(limit, "limit", 1, 20))
             source = self.messages if kind == "messages" else list(self.state[kind].values())
-            rows = [copy.deepcopy(v) for v in source if (not key or v["id"] == key) and (not query or query.casefold() in json.dumps(v).casefold())]
+            rows = [copy.deepcopy(v) for v in source if (not key or v["id"] == key)
+                    and not (kind == "messages" and "human_id" in v and (not key or query))
+                    and (not query or query.casefold() in json.dumps(v).casefold())]
             result = {"kind": kind, "total": len(rows), "start": start, "items": rows[start:start+limit]}
             for row in result["items"]:
                 row.pop("session_id", None)

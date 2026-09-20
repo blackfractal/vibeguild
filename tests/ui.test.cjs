@@ -170,7 +170,7 @@ test('default coordination path appends a subfolder without JSON-escaping the fi
 });
 test('agent checkpoint pane exposes its emergency file',async()=>{
   await run(`view='agent:a';selectedAgentPane='checkpoint';state.agents.a.recovery_file='C:/project/.vibeguild/vibeguild_files/agents/a/RECOVERY.md';state.agents.a.master_memory='C:/project/.vibeguild/vibeguild_files/agents/a/MEMORY.md';state.agents.a.memory_folder='C:/project/.vibeguild/vibeguild_files/agents/a/memory';state.agents.a.heartbeat_file='C:/project/.vibeguild/vibeguild_files/agents/a/HEARTBEAT.json';renderContent()`);
-  assert(node('#stream').innerHTML.includes('data-act="rename-agent"'));
+  assert(node('#profile-slot').innerHTML.includes('data-act="rename-agent"'));
   assert(node('#agent-content').innerHTML.includes('Copy master memory path'));
   assert(node('#agent-content').innerHTML.includes('Copy memory folder path'));
   assert(node('#agent-content').innerHTML.includes('Copy heartbeat file path'));
@@ -447,4 +447,47 @@ test('a full unseen notes page resets pagination instead of skipping a gap',()=>
   run(`mergeHumanNotes('gap-test',newNotes)`);
   assert.equal(run(`humanNotesCache['gap-test'].rows.length`),50);
   assert.equal(run(`humanNotesCache['gap-test'].more`),true);
+});
+
+test('agent configuration occupies a separate slot and clears when navigating away',async()=>{
+  run(`project='layout';view='agent:a';selectedAgentPane='checkpoint';render()`);
+  const shell=node('#app').innerHTML;
+  assert(shell.indexOf('id="channel-head"')<shell.indexOf('id="profile-slot"'));
+  assert(shell.indexOf('id="profile-slot"')<shell.indexOf('id="stream"'));
+  await run('renderContent()');
+  assert(node('#profile-slot').innerHTML.includes('aria-controls="agent-config-details"'));
+  assert(node('#profile-slot').innerHTML.includes('Checkpoint & context'));
+  assert.equal(node('#stream').innerHTML,'<div id="agent-content"></div>');
+  await run(`view='agents';renderContent()`);
+  assert.equal(node('#profile-slot').innerHTML,'');
+});
+
+test('agent disclosure preserves chat DOM, drafts, scroll and UUID-scoped state',async()=>{
+  await run(`project='layout';view='agent:a';selectedAgentPane='checkpoint';renderContent()`);
+  const details=node('#agent-config-details'),toggle=node('#profile-slot [data-act="agent-config"]');
+  details.contains=()=>false;
+  toggle.focus=()=>{context.document.activeElement=toggle;};
+  node('#message-input').value='Unsent draft';
+  node('#stream').scrollTop=125;
+  const chat=node('#agent-content');chat.innerHTML='Existing conversation';
+  await listeners.click[0]({target:{closest:()=>({dataset:{act:'agent-config',id:'a'}})}});
+  assert.equal(details.hidden,true);
+  assert.equal(toggle.getAttribute('aria-expanded'),'false');
+  assert.equal(node('#stream').scrollTop,125);
+  assert.equal(node('#message-input').value,'Unsent draft');
+  assert.equal(node('#agent-content'),chat);
+  assert.equal(chat.innerHTML,'Existing conversation');
+  await run('render();renderContent()');
+  assert(node('#profile-slot').innerHTML.includes('id="agent-config-details" hidden'));
+  run(`state.agents.a.handle='renamed'`);
+  assert(run('agentProfile(state.agents.a)').includes('aria-expanded="false"'));
+  assert(!run(`agentProfile({...state.agents.a,id:'other'})`).includes('aria-expanded="false"'));
+  assert(!run(`project='different';agentProfile(state.agents.a)`).includes('aria-expanded="false"'));
+  run(`project='layout';state.agents.a.handle='atlas'`);
+  node('#stream').scrollTop=600;
+  await listeners.click[0]({target:{closest:()=>({dataset:{act:'agent-config',id:'a'}})}});
+  assert.equal(details.hidden,false);
+  assert.equal(toggle.getAttribute('aria-expanded'),'true');
+  assert.equal(node('#stream').scrollTop,node('#stream').scrollHeight,'bottom-anchored chat stays at bottom');
+  context.document.activeElement=null;
 });

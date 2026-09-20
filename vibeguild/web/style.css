@@ -24,3 +24,26 @@ dialog{width:min(580px,calc(100vw - 40px));max-height:88vh;overflow:auto;border:
 .human-profile-link{width:100%;border:0;background:transparent;padding:7px 4px;text-align:left}.human-profile-link:hover{background:#9be4be0c}.human-profile-link:focus-visible,.profile-shortcut:focus-visible{outline:2px solid var(--mint);outline-offset:3px}.human-heading{min-width:0}.human-heading h2{overflow-wrap:anywhere}.human-profile .agent-header{align-items:flex-start}.human-profile .agent-header .avatar{flex-shrink:0}
 
 .human-notes-title{font-size:12px;font-weight:500;color:var(--mint);padding:0 0 12px;border-bottom:1px solid var(--line);margin-bottom:16px}.human-note .eyebrow{margin:0}.human-note .message-body{margin-top:9px}.human-profile .agent-controls{margin-bottom:18px}
+
+/* Agent configuration is outside the message scroller: no sticky margin gap. */
+#profile-slot{flex:none;min-width:0;background:#191c1f}
+#profile-slot:empty{display:none}
+.agent-profile{padding:14px 26px 0;border-bottom:1px solid var(--line)}
+.agent-profile-summary{display:flex;align-items:center;gap:12px;min-width:0}
+.agent-profile-summary h2{font-size:21px;overflow-wrap:anywhere}
+.agent-profile-summary>button{flex:none}
+.agent-profile-presence{max-width:38%;white-space:normal}
+#agent-config-details{padding-top:10px}
+#agent-config-details[hidden]{display:none}
+.agent-profile .agent-controls{margin:10px 0 8px}
+.agent-profile .segment{margin:8px 0 0;border-bottom:0;flex-wrap:wrap}
+.agent-profile .segment button{padding:9px 12px}
+.agent-profile[data-collapsed="true"]{padding-top:9px}
+.main>.stream{min-height:0}
+@media(max-width:760px){
+  .agent-profile{padding:10px 14px 0}
+  .agent-profile-summary{gap:8px;flex-wrap:wrap}
+  .agent-profile-summary h2{font-size:18px}
+  .agent-profile-presence{font-size:9px}
+  .agent-profile .segment button{padding:8px;font-size:11px}
+}

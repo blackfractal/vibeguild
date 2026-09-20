@@ -18,6 +18,12 @@ succeeds with exit zero and JSON `connected:true`; failure is nonzero with JSON 
 
 ## Mutations
 
+Optional templates use `templates` for metadata discovery and `join --template
+<catalog-slug>` for an explicit selection. A free-text role does not select a template.
+Read [templates](templates.md) only when selecting or restoring a bound template;
+it describes `templates --snapshot` and `templates --show <bound-id> --save` with
+authenticated project/agent/session arguments and pause-aware version checks.
+
 Mutations use `call <action>`.
 
 Write UTF-8 JSON to `--data-file` (BOM accepted). `--body-file` replaces its `body`,

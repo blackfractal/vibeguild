@@ -16,6 +16,9 @@
 5. Same live session with retained UUID: `context_reset`, then bootstrap. New session:
    resume your agent, then bootstrap with the returned session UUID. Honor pause and
    retrieve pending task/message content before continuing.
+6. If your recovered identity has `template_ref`, follow [templates](templates.md)
+   after checking controls. Verify your own saved body before using it; missing or
+   changed content is a loading blocker, never permission to switch versions.
 
 Only your own `MEMORY.md`, `memory/*` and offline `RECOVERY.local.md` allow direct writes;
 use atomic replacement and no credentials/private reasoning. The master is created once

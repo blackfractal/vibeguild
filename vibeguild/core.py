@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from .templates import bind, binding_fields
 from .recovery import memory_dir_path, memory_index_path, recovery_path, skill_path, write_recovery
 
 PALETTE = ["#61d8bb", "#a69aff", "#f2b86b", "#77b9fc", "#ee8fa8", "#bdd977", "#dd9fec", "#69d4e3", "#ef9d71", "#a8b3ce", "#f3d375", "#80cbaa", "#b6a0df", "#ddac97", "#97c8d9", "#cec98c", "#e3a7c4", "#86b5a3", "#acaee8", "#dac2a2"]
@@ -413,6 +414,10 @@ class Project:
                     raise Problem("Short names use lowercase letters, digits, underscores or hyphens")
                 if any(a["handle"] == handle for a in s["agents"].values()):
                     raise Problem("Short name exists; use resume with its UUID", 409)
+                try:
+                    template_ref = bind(args.get("template"))
+                except (ValueError, OSError) as exc:
+                    raise Problem(str(exc)) from exc
                 aid = uid()
                 a = {"id": aid, "handle": handle, "role": text(args.get("role", "contributor"), "role", 100),
                      "provider": text(args.get("provider", "other"), "provider", 80), "owner_id": self.human_id(),
@@ -420,6 +425,8 @@ class Project:
                      "budget_paused": False, "status": "ready", "last_seen": now, "last_report": now,
                      "last_incoming": now, "watch_started": now, "checkpoint": "", "workspace": s["config"]["project"]["workspace"],
                      "session_id": None, "pending": [], "token_estimate": 0}
+                if template_ref is not None:
+                    a["template_ref"] = template_ref
                 s["agents"][aid] = a
                 rid = uid()
                 s["rooms"][rid] = {"id": rid, "name": "@" + handle, "kind": "direct", "members": [aid], "created_at": now}
@@ -427,7 +434,7 @@ class Project:
                 result = self._new_session(s, a, now)
                 if args.get("dormant"):
                     a["status"] = "disconnected"
-                data = {"agent_id": aid, "name": handle}
+                data = {"agent_id": aid, "name": handle, **binding_fields(a)}
                 self._sync_roster(s)
             elif action == "human_update":
                 owner = s["config"]["humans"][0]
@@ -768,10 +775,10 @@ class Project:
         return {"agent_id": agent["id"], "session_id": sid, "credential": token, "direct_room": agent["direct_room"],
                 "recovery_file": str(recovery_path(self, agent["id"])), "master_memory": str(memory_index_path(self, agent["id"])),
                 "memory_folder": str(memory_dir_path(self, agent["id"])), "heartbeat_file": str(self.files / "agents" / agent["id"] / "HEARTBEAT.json"),
-                "skill_file": str(skill_path().resolve())}
+                "skill_file": str(skill_path().resolve()), **binding_fields(agent)}
 
     def _sync_roster(self, state):
-        state["config"]["agents"] = [{k: a[k] for k in ("id", "handle", "color", "owner_id", "role", "provider")} for a in state["agents"].values()]
+        state["config"]["agents"] = [{**{k: a[k] for k in ("id", "handle", "color", "owner_id", "role", "provider")}, **binding_fields(a)} for a in state["agents"].values()]
 
     def snapshot(self):
         with self.lock:
@@ -883,6 +890,7 @@ class Project:
                 out["room_count"] = len(room_ids)
             if bootstrap:
                 out["identity"] = {k: a[k] for k in ("id", "handle", "role", "workspace", "checkpoint", "pending", "direct_room")}
+                out["identity"].update(binding_fields(a))
                 out["tasks"] = [t for t in self.state["tasks"].values() if t["owner"] == actor]
                 out["open_votes"] = [v for v in self.state["votes"].values() if v["status"] == "open" and actor in v["electorate"] and actor not in v["ballots"]]
                 out["room_guidance"] = copy.deepcopy(ROOM_GUIDANCE)
@@ -986,6 +994,16 @@ class Project:
             aa["budget_paused"] = budget is not None and aa["token_estimate"] >= budget
             self._commit("history_read", actor, {"kind": kind, "key": key, "count": len(result["items"])}, s)
             return result
+
+    def template_identity(self, credential):
+        """Authenticated own binding only; no peer-selected path or template body."""
+        with self.lock:
+            self.tick()
+            actor, _ = self.resolve_actor(credential)
+            agent = self.state["agents"][actor]
+            return {"agent_id": actor, "template_ref": agent.get("template_ref"),
+                    "memory_folder": str(memory_dir_path(self, actor)),
+                    "paused": bool(self.state["control"]["paused"] or agent.get("paused") or agent.get("budget_paused"))}
 
     def touch_session(self, credential):
         with self.lock:

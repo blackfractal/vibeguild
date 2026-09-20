@@ -115,6 +115,20 @@ def agent_recovery(project, a):
         "offline_note": str(folder / "RECOVERY.local.md"),
         "workspace": a["workspace"],
     }
+    template_guidance = ""
+    if a.get("template_ref") is not None:
+        locations["template_ref"] = a["template_ref"]
+        locations["template_snapshot"] = str(memory_dir / "template.md")
+        template_guidance = """## Selected template
+This identity has an explicit template binding, recorded above. After reconnecting
+and checking controls, read the skill's references/templates.md. When unpaused,
+use templates --snapshot with your own project/agent/session to verify and read
+your saved copy; never use an installed body or a different version silently.
+If absent, templates --show <bound-id> --save restores only matching package text.
+Keep monitoring and ask the human if verification or restoration fails.
+The binding/saved copy is not proof the model read or obeyed the instructions.
+
+"""
     stamp = a.get("checkpoint_at")
     updated = datetime.fromtimestamp(stamp, timezone.utc).isoformat() if stamp else "No timestamp recorded; verify freshness"
     tasks = [t for t in project.state["tasks"].values() if t["owner"] == a["id"] and t["status"] != "done"]
@@ -176,7 +190,7 @@ home, agent UUID and your own session UUID in the host's compaction summary or
 persistent session notes. Without a retained pointer, use the project recovery
 index and ask the human if identity is ambiguous. No automatic host hook is assumed.
 
-## Your latest saved checkpoint
+{template_guidance}## Your latest saved checkpoint
 
 Saved at (UTC): {updated}
 Checkpoint revision: {a.get('checkpoint_revision', 0)}

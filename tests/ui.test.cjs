@@ -491,3 +491,119 @@ test('agent disclosure preserves chat DOM, drafts, scroll and UUID-scoped state'
   assert.equal(node('#stream').scrollTop,node('#stream').scrollHeight,'bottom-anchored chat stays at bottom');
   context.document.activeElement=null;
 });
+test('template inspection escapes instructions and distinguishes saved, assigned, unavailable and none',()=>{
+  const binding={id:'defensive-reviewer',sha256:'a'.repeat(64)};
+  for(const [status,label] of [['saved','Verified saved copy'],['assigned','Assigned; saved copy not available']]){
+    context.templateInfo={state:status,template_ref:binding,title:'Reviewer <title>',body:'<script>alert(1)</script>\n# Exact text'};
+    const html=run('templateHTML(templateInfo)');
+    assert(html.includes(label));assert(html.includes('&lt;script&gt;'));assert(!html.includes('<script>'));
+    assert(html.includes('# Exact text'));assert(html.includes('does not confirm'));
+  }
+  context.templateInfo={state:'unavailable',template_ref:binding,body:'UNVERIFIED BODY',error:'<bad path>'};
+  const unavailable=run('templateHTML(templateInfo)');
+  assert(unavailable.includes('Bound instructions unavailable'));assert(!unavailable.includes('UNVERIFIED BODY'));
+  assert(unavailable.includes('&lt;bad path&gt;'));
+  assert(run("templateHTML({state:'none'})").includes('No template assigned'));
+});
+
+test('only Template pane fetches a bound body, and an untemplated profile needs no request',async()=>{
+  const originalFetch=context.fetch;const urls=[];
+  context.fetch=async url=>{urls.push(url);return {ok:true,json:async()=>({state:'saved',template_ref:{id:'defensive-reviewer',sha256:'a'.repeat(64)},body:'Assigned instructions'})};};
+  try{
+    run(`project='templates';view='agent:a';selectedAgentPane='checkpoint';state.agents.a.template_ref={id:'defensive-reviewer',sha256:'a'.repeat(64)}`);
+    await run('renderContent()');assert.equal(urls.length,0);
+    await run(`selectedAgentPane='template';renderContent()`);
+    assert.deepEqual(urls,['/api/agent-template?project=templates&agent=a']);
+    assert(node('#agent-content').innerHTML.includes('Assigned instructions'));
+    assert.equal(node('#composer-slot').innerHTML,'');
+    await run('delete state.agents.a.template_ref;renderContent()');
+    assert.equal(urls.length,1);assert(node('#agent-content').innerHTML.includes('No template assigned'));
+  }finally{context.fetch=originalFetch;run('delete state.agents.a.template_ref');}
+});
+
+test('late template responses cannot overwrite another project, pane, or a newer response',async()=>{
+  const originalFetch=context.fetch;let complete;
+  context.fetch=async()=>new Promise(resolve=>{complete=()=>resolve({ok:true,json:async()=>({state:'saved',body:'STALE BODY'})});});
+  try{
+    for(const change of ["project='another'","selectedAgentPane='checkpoint'","view='agents'"]){
+      run(`project='templates';view='agent:a';selectedAgentPane='template';state.agents.a.template_ref={id:'defensive-reviewer',sha256:'a'.repeat(64)}`);
+      const pending=run('renderContent()');
+      run(change);if(change.startsWith('project'))run("selectedAgentPane='checkpoint'");
+      await run('renderContent()');const expected=node('#agent-content').innerHTML;
+      complete();await pending;assert.equal(node('#agent-content').innerHTML,expected);assert(!expected.includes('STALE BODY'));
+    }
+    run(`project='templates';view='agent:a';selectedAgentPane='template'`);
+    const older=run('renderContent()'),oldComplete=complete;
+    const newer=run('renderContent()');complete();await newer;
+    node('#agent-content').innerHTML='NEWER CONTENT';oldComplete();await older;
+    assert.equal(node('#agent-content').innerHTML,'NEWER CONTENT');
+  }finally{context.fetch=originalFetch;run('delete state.agents.a.template_ref');}
+});
+
+test('Add agent lists metadata only, defaults to no template, and submits explicit provider and template choices',async()=>{
+  const originalFetch=context.fetch,originalFormData=context.FormData;
+  const calls=[];let selection='',provider='codex';
+  context.FormData=class{*[Symbol.iterator](){yield ['handle','new-agent'];yield ['role','reviewer'];yield ['provider',provider];yield ['provider_custom','Ignored custom name'];yield ['template',selection];}};
+  node('#modal').showModal=()=>{};node('#modal').close=()=>{};
+  context.fetch=async(url,options)=>{
+    calls.push({url,body:options?.body?JSON.parse(options.body):null});
+    if(url==='/api/templates')return {ok:true,json:async()=>({templates:[{id:'defensive-reviewer',title:'Defensive <reviewer>',summary:'Find regressions'}]})};
+    if(url==='/api/command')return {ok:true,json:async()=>({ok:true})};
+    if(url.startsWith('/api/state'))return {ok:true,json:async()=>run('({...state})')};
+    throw Error('Unexpected request '+url);
+  };
+  try{
+    run(`project='templates';view='agents';selectedAgentPane='chat'`);
+    await run('addAgentProfile()');
+    const html=node('#modal-content').innerHTML;
+    assert(html.includes('Add an agent'));assert(html.includes('Choose a provider'));assert(html.includes('Claude Code'));
+    assert(html.includes('<option value="" selected>None'));assert(html.includes('Defensive &lt;reviewer&gt;'));
+    assert.equal(calls.length,1);assert.equal(calls[0].url,'/api/templates');
+    await node('#modal-form').onsubmit({preventDefault(){},submitter:{}});
+    const first=calls.find(c=>c.url==='/api/command').body;
+    assert.equal(first.action,'register');assert.equal(first.args.role,'reviewer');assert(!('template' in first.args));
+    assert.equal(first.args.provider,'codex');assert.equal(first.args.dormant,true);assert(!('provider_custom' in first.args));
+    calls.length=0;selection='defensive-reviewer';provider='claude-code';await run('addAgentProfile()');
+    await node('#modal-form').onsubmit({preventDefault(){},submitter:{}});
+    assert.equal(calls.find(c=>c.url==='/api/command').body.args.template,'defensive-reviewer');
+    assert.equal(calls.find(c=>c.url==='/api/command').body.args.provider,'claude-code');
+  }finally{context.fetch=originalFetch;context.FormData=originalFormData;}
+});
+
+test('Other provider enables a required name and rejects missing choices without registering',async()=>{
+  const originalFetch=context.fetch,originalFormData=context.FormData;
+  const calls=[];let provider='',custom='';
+  context.FormData=class{*[Symbol.iterator](){yield ['handle','custom-agent'];yield ['role','contributor'];yield ['provider',provider];yield ['provider_custom',custom];}};
+  context.fetch=async(url,options)=>{
+    if(url==='/api/templates')return {ok:true,json:async()=>({templates:[]})};
+    if(url==='/api/command'){calls.push(JSON.parse(options.body));return {ok:true,json:async()=>({ok:true})};}
+    if(url.startsWith('/api/state'))return {ok:true,json:async()=>run('({...state})')};
+    throw Error('Unexpected request '+url);
+  };
+  try{
+    run(`project='provider-form';view='agents'`);
+    await run('addAgentProfile()');
+    const selector=node('#f-provider'),name=node('#f-provider-custom');
+    selector.value='codex';selector.onchange();assert.equal(name.disabled,true);assert.equal(name.required,false);
+    assert.equal(node('#provider-custom-fields').hidden,true);
+    const submit=()=>node('#modal-form').onsubmit({preventDefault(){},submitter:{}});
+    await submit();assert.equal(calls.length,0);assert(node('#modal-error').textContent.includes('Choose a provider'));
+    selector.value=provider='other';selector.onchange();
+    assert.equal(name.disabled,false);assert.equal(name.required,true);assert.equal(node('#provider-custom-fields').hidden,false);
+    custom='  ';await submit();assert.equal(calls.length,0);
+    custom='x'.repeat(81);await submit();assert.equal(calls.length,0);
+    custom='  Gemini CLI  ';await submit();assert.equal(calls.length,1);
+    assert.equal(calls[0].action,'register');assert.equal(calls[0].args.provider,'Gemini CLI');assert.equal(calls[0].args.dormant,true);
+    assert(!('provider_custom' in calls[0].args));
+    selector.value='claude-code';selector.onchange();assert.equal(name.disabled,true);assert.equal(name.required,false);
+  }finally{context.fetch=originalFetch;context.FormData=originalFormData;}
+});
+
+test('connect instructions retain the binding and require bootstrap and pause check',()=>{
+  node('#modal').showModal=()=>{};
+  run(`connectHelp({...state.agents.a,template_ref:{id:'defensive-reviewer',sha256:'a'.repeat(64)}})`);
+  const html=node('#modal-content').innerHTML;
+  assert(html.includes('vibeguild resume'));assert(html.includes('defensive-reviewer'));
+  assert(html.includes('bootstrap and controls'));assert(html.includes('Wait while paused'));
+  assert(!html.includes('--template'),'resume does not allow rebinding');
+});

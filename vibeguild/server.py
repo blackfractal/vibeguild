@@ -11,6 +11,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .core import Project, Problem, FileLock, atomic, encoded
+from .templates import catalog, selected, profile_template
+from .recovery import memory_dir_path
 from .folder_picker import choose_folder, PickerError
 
 
@@ -118,6 +120,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, {"ok": True}, cookie=True)
             if url.path == "/api/health":
                 return self.respond(200, {"ok": True, "service": "vibeguild", "version": "0.1.0"})
+            if url.path == "/api/templates":
+                return self.respond(200, selected(query["id"]) if "id" in query else {"templates": catalog()})
             if not url.path.startswith("/api/"):
                 allowed = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8")}
                 if url.path not in allowed:
@@ -129,6 +133,13 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/recent":
                 return self.respond(200, {"paths": self.app.recent})
             p = self.app.project(query.get("project"))
+            if url.path == "/api/agent-template":
+                with p.lock:
+                    agent = p.state["agents"].get(query.get("agent"))
+                    if agent is None:
+                        raise Problem("Unknown agent", 404)
+                    result = profile_template(agent, memory_dir_path(p, agent["id"]))
+                return self.respond(200, result)
             if url.path == "/api/state":
                 return self.respond(200, p.snapshot())
             if url.path == "/api/history":
@@ -151,7 +162,7 @@ class Handler(BaseHTTPRequestHandler):
             raise Problem("Not found", 404)
         except Problem as exc:
             self.respond(exc.status, {"error": str(exc), "code": getattr(exc, "code", None)})
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, OSError) as exc:
             self.respond(400, {"error": str(exc)})
         except Exception:
             self.respond(500, {"error": "Unexpected service error; retry safely with the same request ID"})
@@ -210,6 +221,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise OwnerSessionRequired()
                 result = p.command(args["action"], args.get("args", {}), credential, human, args.get("request_id"))
                 return self.respond(200, result)
+            if path == "/api/template-identity":
+                return self.respond(200, p.template_identity(credential))
             if path == "/api/inbox":
                 return self.respond(200, p.inbox(credential, args.get("bootstrap", False), args.get("max_bytes")))
             if path == "/api/fetch":

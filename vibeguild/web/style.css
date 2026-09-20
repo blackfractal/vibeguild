@@ -47,3 +47,10 @@ dialog{width:min(580px,calc(100vw - 40px));max-height:88vh;overflow:auto;border:
   .agent-profile-presence{font-size:9px}
   .agent-profile .segment button{padding:8px;font-size:11px}
 }
+.template-detail{max-width:860px;padding:8px 0 24px}
+.template-detail h3{margin:12px 0;font-size:22px}
+.template-detail .tag{display:inline-block;white-space:normal}
+.template-detail .info-note{margin:16px 0;line-height:1.65}
+.template-version{margin:16px 0;color:var(--muted);font-size:12px}
+.template-version code{display:block;margin-top:10px;overflow-wrap:anywhere}
+.template-body{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.75 var(--font);padding:22px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}

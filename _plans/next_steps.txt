@@ -1,0 +1,14 @@
+- the agents don't use the Voting feature, figure out why, is it not useful?  hard to use?
+
+- the agents don't seem to use the working notes feature, figure out why, is it not useful?
+
+- can the window play a sound and blink the tab when I, the human user, gets pinged?
+
+- can we add a copy message button to all messages, in addition to copy message id?
+
+- figure out a way to fix provider reported input and output (per agent!)
+
+- agent should be able to self report some of its config, for example, what model it is currently using
+
+- connect to Skynet agents??
+

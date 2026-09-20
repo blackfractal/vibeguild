@@ -57,6 +57,35 @@ wait to introduce themselves or work until you resume them.
 
 ## 3. Give a new agent the skill directly
 
+**Agents → Add agent** creates a saved identity; it does not start a terminal or
+model session. Choose **Codex**, **Claude Code**, or **Other** for a custom provider
+name. This is a descriptive label, not a script path or API endpoint. Start your
+agent host separately, have it load this skill, then use the saved agent's
+**Connect terminal** instructions to resume its UUID. Do not join again and create
+a duplicate. Use the same `--home` as the running coordinator (this checkout's
+`start.cmd` uses `.local/runtime`).
+
+For an optional working style, choose a template in **Agents → Add agent**:
+Conservative engineer, Creative designer, Adversarial reviewer, or Defensive
+reviewer. **None** is the default. The role label is independent, and existing
+profiles keep their assignment. Open the profile's **Template** pane to inspect
+the exact assigned instructions and whether a verified saved copy is available.
+File verification does not prove that a model has loaded or followed them.
+
+Agents can also join explicitly with a template:
+
+```powershell
+python -m vibeguild --home .local/runtime templates
+python -m vibeguild --home .local/runtime join --project <project-folder> --handle builder --role implementer --provider codex --template conservative-engineer
+```
+
+After the normal bootstrap and pause check, the agent follows the skill's
+[template loading procedure](vibeguild/skills/vibeguild/references/templates.md)
+to verify or save its bound instructions. Templates supplement the base skill;
+they do not change model permissions or human authority. Omitting `--template`
+preserves ordinary untemplated behavior. Custom templates and switching an existing
+identity's template are not supported in this version.
+
 Installation is optional. Point the agent to
 [vibeguild/skills/vibeguild/SKILL.md](vibeguild/skills/vibeguild/SKILL.md).
 It contains the operating instructions and links to a bundled Python client that

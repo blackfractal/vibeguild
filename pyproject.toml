@@ -16,4 +16,4 @@ vibeguild = "vibeguild.cli:main"
 include = ["vibeguild*"]
 
 [tool.setuptools.package-data]
-vibeguild = ["web/*", "skills/vibeguild/*", "skills/vibeguild/references/*", "skills/vibeguild/scripts/*"]
+vibeguild = ["web/*", "skills/vibeguild/*", "skills/vibeguild/references/*", "skills/vibeguild/references/templates/*", "skills/vibeguild/scripts/*"]

@@ -9,10 +9,12 @@ import uuid
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlencode
 
 from .core import Project, Problem, atomic, uid
 from .server import home, make_server
 from .monitor import tripwire
+from .templates import read_snapshot, save_snapshot, snapshot_path, validate_binding
 
 
 def request(endpoint, route, body, credential=None):
@@ -27,6 +29,41 @@ def request(endpoint, route, body, credential=None):
         raise Problem(detail.get("error", str(exc)), exc.code)
     except urllib.error.URLError as exc:
         raise Problem("Coordinator unavailable. Start 'vibeguild serve'; do not repeatedly post presence questions. " + str(exc.reason))
+
+
+def public_templates(template_id=None):
+    endpoint = json.loads((home() / "endpoint-public.json").read_text("utf-8"))
+    suffix = "?" + urlencode({"id": template_id}) if template_id is not None else ""
+    try:
+        with urllib.request.urlopen(endpoint["url"] + "/api/templates" + suffix, timeout=10) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as exc:
+        with exc:
+            detail = json.load(exc)
+        raise Problem(detail.get("error", str(exc)), exc.code) from exc
+    except urllib.error.URLError as exc:
+        raise Problem("Coordinator unavailable: " + str(exc.reason)) from exc
+
+
+def template_operation(args, endpoint, pid, credential):
+    if not credential:
+        raise Problem("Template snapshot operations require --project, --agent and --session")
+    info = request(endpoint, "/api/template-identity", {"project": pid}, credential)
+    if info["agent_id"] != args.agent:
+        raise Problem("Template identity does not match this session")
+    if info["paused"]:
+        raise Problem("Paused: defer template loading/saving; checkpoint and watch controls", 409)
+    ref = validate_binding(info["template_ref"])
+    if args.snapshot:
+        body = read_snapshot(info["memory_folder"], ref)
+        return {"template_ref": ref, "body": body, "snapshot": str(snapshot_path(info["memory_folder"]))}
+    if not args.save or args.show != ref["id"]:
+        raise Problem("--save requires --show with this identity's bound template id")
+    content = public_templates(args.show)
+    if content["id"] != ref["id"] or content["sha256"] != ref["sha256"]:
+        raise Problem("Coordinator template version differs from this identity's binding")
+    path = save_snapshot(info["memory_folder"], ref, content["body"])
+    return {"template_ref": ref, "snapshot": path, "body": content["body"]}
 
 
 def parser():
@@ -53,6 +90,14 @@ def parser():
     recover = sub.add_parser("recover", help="Read the project/agent recovery file, even when the coordinator is offline")
     recover.add_argument("--project", required=True, help="Coordination folder or workspace containing .vibeguild")
     recover.add_argument("--agent", help="Your immutable agent UUID; omit to read the identity index")
+    templates = sub.add_parser("templates", help="List built-ins or explicitly read one selected template")
+    selection = templates.add_mutually_exclusive_group()
+    selection.add_argument("--show", help="Canonical selected template id")
+    selection.add_argument("--snapshot", action="store_true", help="Verify/read only this identity's saved copy")
+    templates.add_argument("--save", action="store_true", help="Save matching --show content to own memory/template.md")
+    templates.add_argument("--project")
+    templates.add_argument("--agent")
+    templates.add_argument("--session")
     for name in ("open", "join", "resume", "inbox", "watch", "tripwire", "fetch", "inspect", "call"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--project", required=True, help="Coordination folder or project UUID")
@@ -63,6 +108,7 @@ def parser():
             cmd.add_argument("--handle", required=True)
             cmd.add_argument("--role", default="contributor")
             cmd.add_argument("--provider", default="other")
+            cmd.add_argument("--template", help="Explicit opt-in built-in template slug")
         if name == "resume":
             cmd.add_argument("--agent", required=True)
             cmd.add_argument("--takeover", action="store_true")
@@ -128,6 +174,8 @@ def main(argv=None):
             if health.get("ok") is not True or health.get("service") != "vibeguild":
                 raise Problem("Unexpected response from coordinator health endpoint")
             result = {"connected": True, "endpoint": public_endpoint["url"], "service": health["service"], "version": health["version"]}
+        elif args.command == "templates" and not (args.save or args.snapshot):
+            result = public_templates(args.show)
         elif args.command == "init":
             context = Path(args.context_file).read_text("utf-8") if args.context_file else ""
             p = Project.create(args.path, args.name, args.goal, args.workspace, args.human, args.reference, context)
@@ -160,6 +208,11 @@ def main(argv=None):
             atomic(target / "scripts" / "app.json", {"python": sys.executable, "app_root": str(Path(__file__).parent.parent)})
             result = {"installed": str(target)}
         else:
+            if args.command == "templates":
+                if not (args.project and args.agent and args.session):
+                    raise Problem("Template snapshot operations require --project, --agent and --session")
+                if args.save and (args.snapshot or not args.show):
+                    raise Problem("--save requires --show, and cannot be combined with --snapshot")
             try:
                 endpoint = json.loads((home() / "endpoint.json").read_text("utf-8"))
             except (OSError, ValueError):
@@ -199,13 +252,15 @@ def main(argv=None):
                 if args.command in ("open", "doctor"):
                     result = {"project_id": pid, "url": endpoint["url"], "connected": True}
                 elif args.command in ("join", "resume"):
-                    data = {"handle": args.handle, "role": args.role, "provider": args.provider} if args.command == "join" else {"agent_id": args.agent, "takeover": args.takeover}
+                    data = {"handle": args.handle, "role": args.role, "provider": args.provider, "template": args.template} if args.command == "join" else {"agent_id": args.agent, "takeover": args.takeover}
                     result = request(endpoint, "/api/command", {**base, "action": "register" if args.command == "join" else "resume", "args": data, "request_id": uid()})
                     atomic(home() / "sessions" / f'{pid}_{result["session_id"]}.json', {"project": pid, **result})
                     result.pop("credential", None)
                     result["project_id"] = pid
                     result["coordinator_home"] = str(home())
                     result["next"] = "inbox --bootstrap; read general_context and controls before work"
+                elif args.command == "templates":
+                    result = template_operation(args, endpoint, pid, credential)
                 elif args.command == "inbox":
                     if not credential:
                         raise Problem("inbox requires --agent")

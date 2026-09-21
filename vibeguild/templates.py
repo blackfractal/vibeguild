@@ -17,6 +17,7 @@ CATALOG = (
     {"id": "creative-designer", "title": "Creative designer", "summary": "Explore distinct approaches and reduce the key design uncertainty."},
     {"id": "adversarial-reviewer", "title": "Adversarial reviewer", "summary": "Challenge design premises with concrete counterexamples and alternatives."},
     {"id": "defensive-reviewer", "title": "Defensive reviewer", "summary": "Trace compatibility and failure paths to find reproducible regressions."},
+    {"id": "arbitrator", "title": "Arbitrator", "summary": "Weigh competing viewpoints, clarify evidence gaps and reach a reasoned outcome."},
 )
 
 

@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class TemplateUnitTests(unittest.TestCase):
     def test_catalog_is_metadata_only_and_bodies_are_bounded(self):
         with patch.object(t, "read_body", side_effect=AssertionError("unexpected body read")):
-            self.assertEqual(4, len(t.catalog()))
+            self.assertEqual(5, len(t.catalog()))
         for item in t.catalog():
             content = t.selected(item["id"])
             raw = t.canonical_body(content["body"])
@@ -209,22 +209,22 @@ class TemplateHTTPTests(unittest.TestCase):
     def test_actual_cli_and_installed_launcher_snapshot_roundtrip(self):
         installed = self.cli("install-skill", "--dest", str(self.root / "skills"))
         launcher = Path(installed["installed"]) / "scripts" / "vibeguild_client.py"
-        self.assertEqual(4, len(self.cli("templates", launcher=launcher)["templates"]))
-        a = self.cli("join", "--project", str(self.p.path), "--handle", "cli", "--template", "defensive-reviewer", launcher=launcher)
+        self.assertEqual(5, len(self.cli("templates", launcher=launcher)["templates"]))
+        a = self.cli("join", "--project", str(self.p.path), "--handle", "cli", "--template", "arbitrator", launcher=launcher)
         identity = ["--project", self.p.id, "--agent", a["agent_id"], "--session", a["session_id"]]
-        self.assertIn("Paused", self.cli("templates", "--show", "defensive-reviewer", "--save", *identity, success=False)["error"])
+        self.assertIn("Paused", self.cli("templates", "--show", "arbitrator", "--save", *identity, success=False)["error"])
         self.command("control", {"paused": False})
         self.assertIn("bound", self.cli("templates", "--show", "creative-designer", "--save", *identity, success=False)["error"])
-        saved = self.cli("templates", "--show", "defensive-reviewer", "--save", *identity, launcher=launcher)
+        saved = self.cli("templates", "--show", "arbitrator", "--save", *identity, launcher=launcher)
         snapshot = self.cli("templates", "--snapshot", *identity)
         self.assertEqual(saved["body"], snapshot["body"])
         self.assertEqual(Path(a["memory_folder"]) / "template.md", Path(saved["snapshot"]))
         status, profile = self.http("/api/agent-template?project=" + self.p.id + "&agent=" + a["agent_id"], owner=True)
         self.assertEqual("saved", profile["state"])
-        with patch("vibeguild.server.selected", return_value={"id": "defensive-reviewer", "sha256": "0"*64, "body": "Changed"}):
+        with patch("vibeguild.server.selected", return_value={"id": "arbitrator", "sha256": "0"*64, "body": "Changed"}):
             self.assertEqual(saved["body"], self.cli("templates", "--snapshot", *identity)["body"])
             Path(saved["snapshot"]).unlink()
-            error = self.cli("templates", "--show", "defensive-reviewer", "--save", *identity, success=False)
+            error = self.cli("templates", "--show", "arbitrator", "--save", *identity, success=False)
             self.assertIn("differs", error["error"])
             self.assertFalse(Path(saved["snapshot"]).exists())
         for item in t.catalog():

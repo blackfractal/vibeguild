@@ -12,8 +12,9 @@ installed Python launcher and `vibeguild` command share the implementation.
 ## Select explicitly before joining
 
 `templates` lists only IDs, titles and summaries from the running coordinator. The
-catalog contains conservative-engineer, creative-designer, adversarial-reviewer and
-defensive-reviewer. Map a natural-language request such as "adversarial reviewer"
+catalog contains conservative-engineer, creative-designer, adversarial-reviewer,
+defensive-reviewer and arbitrator. The arbitrator supplies a deliberation method;
+only human appointment grants LEAD decision authority. Map a natural-language request such as "adversarial reviewer"
 through the catalog title to its canonical ID; clarify if the match is ambiguous.
 Select only the requested canonical slug. A request for a
 general reviewer *role* can use `--role reviewer` without a template. An explicit
